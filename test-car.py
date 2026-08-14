@@ -29,6 +29,15 @@ import struct
 import time
 from bleak import BleakScanner, BleakClient
 
+# VL53L0X front distance sensor (I2C). Only available on the Pi; on a laptop the
+# imports fail and we fall back to velocity-stall obstacle detection only.
+try:
+    import board
+    import adafruit_vl53l0x
+    SENSOR_LIBS_OK = True
+except Exception:
+    SENSOR_LIBS_OK = False
+
 # ---- Device / protocol constants (from BuWizz 3.0 API) ----------------------
 DEVICE_NAME    = "BuWizz3"                                   # advertised name
 BUWIZZ_SERVICE = "500592d1-74fb-4481-88b3-9919b1676e93"      # main service UUID
@@ -101,8 +110,17 @@ STALL_VEL   = 4       # |drive velocity| below this counts as "not moving"
 STALL_TIME  = 0.4     # must stay stalled this long (while powered) -> obstacle
 DRIVE_GRACE = 0.6     # ignore stalls this long after starting to drive (spin-up)
 
+# ---- Front distance sensor (VL53L0X) ----------------------------------------
+# When driving forward, an obstacle seen within this distance triggers the same
+# recovery as a physical hit. 200 mm gives the car room to stop/turn before
+# contact (real avoidance); lower it toward "touching" only if you want it to
+# react later.
+SENSOR_TRIGGER_MM = 250  # obstacle if the front sensor reads <= this (and > 0)
+SENSOR_MIN_MM     = 1    # readings at/below this are treated as invalid/noise
+
 latest_status = {}
 disconnect_info = {"reason": None}
+distance_sensor = None    # set in main() when the VL53L0X is present
 # Filled in by calibrate_steering()/quick_home(): motor-degree center and half.
 steer_cal = {"center": 0.0, "half": 0.0}
 
@@ -384,6 +402,36 @@ def drive_vel():
     return v[DRIVE_PORT - 1] if len(v) >= DRIVE_PORT else None
 
 
+def init_sensor():
+    """Bring up the VL53L0X front sensor if the libraries and hardware are
+    present. Sets the module-level `distance_sensor`. Returns True on success."""
+    global distance_sensor
+    if not SENSOR_LIBS_OK:
+        print("Front sensor: libraries not available -> velocity-stall detection only.")
+        return False
+    try:
+        i2c = board.I2C()
+        distance_sensor = adafruit_vl53l0x.VL53L0X(i2c)
+        print(f"Front sensor: VL53L0X ready (trigger <= {SENSOR_TRIGGER_MM} mm).")
+        return True
+    except Exception as e:
+        print(f"Front sensor: not detected ({e}) -> velocity-stall detection only.")
+        distance_sensor = None
+        return False
+
+
+def read_distance():
+    """Front obstacle distance in mm, or None if no sensor / bad read. Values at
+    or below SENSOR_MIN_MM are treated as invalid (error/no-return)."""
+    if distance_sensor is None:
+        return None
+    try:
+        mm = distance_sensor.range
+    except Exception:
+        return None
+    return mm if mm > SENSOR_MIN_MM else None
+
+
 async def drive(client, char, pwm, seconds, steer_deg, detect=True, accelerate=False,
                 hz=20):
     """Drive the drive motor at `pwm` for up to `seconds` while holding the
@@ -417,6 +465,15 @@ async def drive(client, char, pwm, seconds, steer_deg, detect=True, accelerate=F
             last_feed = now
 
         v = drive_vel()
+        # Proactive: front sensor sees an obstacle close ahead while driving
+        # forward -> react before contact (same recovery as a physical hit).
+        if detect and pwm > 0:
+            d = read_distance()
+            if d is not None and d <= SENSOR_TRIGGER_MM:
+                await send(client, char, hold_pkt)  # stop drive, hold steer
+                print(f"    ! sensor {d} mm -> obstacle ahead")
+                return True
+        # Fallback: commanding motion but the drive motor isn't turning -> hit.
         if detect and pwm != 0 and now - start > DRIVE_GRACE:
             if v is not None and abs(v) < STALL_VEL:
                 stalled_since = stalled_since or now
@@ -547,7 +604,7 @@ async def run_selftest(client, char):
 
 
 async def main(recalibrate=False, selftest=False, duration=MISSION_TIME,
-               accelerate=False):
+               accelerate=False, use_sensor=True):
     print(f"Scanning for {DEVICE_NAME} ...")
     device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=15.0)
     if device is None:
@@ -570,6 +627,9 @@ async def main(recalibrate=False, selftest=False, duration=MISSION_TIME,
         await send(client, app, bytes([CMD_MOTOR_TIMEOUT, 0]))          # brake on timeout
         await feed_watchdog(client, app)          # arm watchdog (re-armed in hold())
         await asyncio.sleep(0.3)
+
+        if use_sensor:
+            init_sensor()                          # front obstacle sensor (Pi only)
 
         # --recalibrate: do a full two-stop calibration, cache it, and stop.
         if recalibrate:
@@ -633,6 +693,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--accelerate", action="store_true",
         help="Speed up while cruising a clear path (off by default).")
+    parser.add_argument(
+        "--no-sensor", action="store_true",
+        help="Ignore the front distance sensor (use velocity-stall detection only).")
+    parser.add_argument(
+        "--sensor-mm", type=int, default=SENSOR_TRIGGER_MM, metavar="MM",
+        help=f"Trigger recovery when the front sensor reads this close, in mm "
+             f"(default {SENSOR_TRIGGER_MM}; ~150-300 recommended for real "
+             f"avoidance).")
     args = parser.parse_args()
+    SENSOR_TRIGGER_MM = args.sensor_mm
     asyncio.run(main(recalibrate=args.recalibrate, selftest=args.selftest,
-                     duration=args.duration, accelerate=args.accelerate))
+                     duration=args.duration, accelerate=args.accelerate,
+                     use_sensor=not args.no_sensor))
