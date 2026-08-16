@@ -11,7 +11,7 @@ motor stalls against something the sensor missed), it backs up, turns a random
 direction, and drives around — repeating for the length of the run.
 
 ```
-Raspberry Pi (on the car)
+Raspberry Pi Zero 2 W (on the car)
    ├── I²C ───────────► VL53L0X distance sensor (front)
    └── Bluetooth LE ──► BuWizz 3.0 Pro ──► XL drive motor + L steering motor
 ```
@@ -241,6 +241,8 @@ Raspberry Pi because of limited memory.
 
 ## References
 
+- **Raspberry Pi Zero 2 W** — https://www.amazon.com/dp/B0DRRDJKDV?ref_=ppx_hzod_title_dt_b_fed_asin_title_1_1
+- **VL53L0X distance sensor** — https://www.amazon.com/dp/B0DP6893DS?ref_=ppx_hzod_title_dt_b_fed_asin_title_0_0&th=1
 - **LEGO model** — Otrans' *Mercedes-Benz G500 Professional Line — RC mod for Powered Up
   motors + LED light* (MOC-203945), published on Rebrickable:
   <https://rebrickable.com/mocs/MOC-203945/otrans/42177-mercedes-benz-g500-professional-line-rc-mod-for-powered-up-motors-led-light/#parts>
