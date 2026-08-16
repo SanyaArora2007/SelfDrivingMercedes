@@ -205,6 +205,19 @@ sensor libraries/hardware aren't there.
 **I²C** is the two-wire bus (a data line **SDA** and a clock line **SCL**, plus
 power and ground) that the Pi uses to talk to the distance sensor.
 
+The VL53L0X sensor is wired to the Raspberry Pi's 40-pin header like this:
+
+| VL53L0X pin | Raspberry Pi pin | Function |
+|---|---|---|
+| **VCC** / VIN | Pin 1 — **3.3 V** | Power |
+| **GND** | Pin 6 — **GND** | Ground |
+| **SDA** | Pin 3 — **GPIO2** | I²C data |
+| **SCL** | Pin 5 — **GPIO3** | I²C clock |
+| **XSHUT** | Pin 11 — **GPIO17** *(optional)* | Shutdown/enable — only needed to run more than one sensor |
+
+With a single sensor, XSHUT can be left unconnected — the sensor comes up at its
+default I²C address `0x29`.
+
 ---
 
 ## Future: multiple sensors with an I²C multiplexer (TCA9548A)
