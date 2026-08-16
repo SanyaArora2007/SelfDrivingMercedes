@@ -84,7 +84,7 @@ smart-brick options because of what this project needed:
 - **On-board position/speed servo control.** The brick has a built-in PID
   controller per port, so I can command "steer to X degrees" and the brick
   holds it — no servo loop needed on my side.
-- **A documented BLE API.** This allows me to use python to control the buwizz using `bleak`.
+- **A documented BLE API.** This allows me to use Python to control the BuWizz using `bleak`.
 - **Plenty of current** for the drive and steering motors, with configurable
   per-port current limits.
 
@@ -226,7 +226,7 @@ Right now the car drives on **one** forward sensor. To sense in more directions
 (front + sides, or a wider forward arc), it needs multiple VL53L0X sensors. I tried
 using the XSHUT method to constantly turn on and off each sensor and cycle between them
 to get readings from all sensors. This didn't work because of either soldering issues, or
-bad part. Next, I would like to use an I²C multiplexer, so multiple sensors can be read
+a bad part. Next, I would like to use an I²C multiplexer, so multiple sensors can be read
 together. This would allow me to use different types of sensors, like, color, sound, or 
 motion.
 
