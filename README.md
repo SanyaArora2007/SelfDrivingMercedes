@@ -235,4 +235,16 @@ motion.
 Every time I test my self-driving car my dog always runs away from it. I would like to try
 and add a camera that uses an OpenCV model (compatible with this Raspberry Pi) to detect and
 avoid my scared dog. Turns out using a VLM (Vision Language Model) is not possible on this
-Raspberry Pi because of limited memory. 
+Raspberry Pi because of limited memory.
+
+---
+
+## References
+
+- **LEGO model** — Otrans' *Mercedes-Benz G500 Professional Line — RC mod for Powered Up
+  motors + LED light* (MOC-203945), published on Rebrickable:
+  <https://rebrickable.com/mocs/MOC-203945/otrans/42177-mercedes-benz-g500-professional-line-rc-mod-for-powered-up-motors-led-light/#parts>
+- **LEGO parts** — sourced from [BrickOwl](https://www.brickowl.com/) and
+  [ToyPro](https://www.toypro.com/). Rebrickable offers an easy way to differentiate parts
+  between multiple LEGO sets, so you know exactly what to buy.
+- **BuWizz 3.0 Pro** — <https://buwizz.com/shop/buwizz-3-0-pro/>
