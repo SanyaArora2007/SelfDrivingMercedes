@@ -234,5 +234,5 @@ motion.
 
 Every time I test my self-driving car my dog always runs away from it. I would like to try
 and add a camera that uses an OpenCV model (compatible with this Raspberry Pi) to detect and
-avoid my sacred dog. Turns out using a VLM (Vision Language Model) is not possible on this
+avoid my scared dog. Turns out using a VLM (Vision Language Model) is not possible on this
 Raspberry Pi because of limited memory. 
