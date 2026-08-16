@@ -1,22 +1,33 @@
 #!/opt/anaconda3/bin/python3
 
 """
-buwizz_start.py  -  minimal BuWizz 3.0 Pro control starter (laptop, Python + bleak)
+DriveCar.py  -  Self-Driving Mercedes: autonomous obstacle-avoidance driving
 
-Connects to your BuWizz 3.0 Pro over Bluetooth LE, runs a short, safe motion
-self-test on your two motors (XL drive + L steer), and prints live telemetry
-(battery, per-port current, drive motor velocity) so you can see the feedback
-loop working. This is a foundation to build interactive/autonomous control on.
+Controls a LEGO car powered by a BuWizz 3.0 Pro (XL drive motor + L steering
+motor) over Bluetooth LE. On start it calibrates the steering to its end stops,
+then cruises forward and avoids obstacles on its own: a front VL53L0X distance
+sensor reacts before contact, and a velocity-stall check catches anything the
+beam misses. On an obstacle it backs up, turns a random direction, and drives
+around, then keeps cruising for the mission duration.
+
+Runs on the Raspberry Pi mounted on the car (the pi reads the I2C sensor and
+drives the BuWizz over BLE). Without the sensor libraries/hardware (e.g. on a
+laptop) it falls back to velocity-stall detection only.
 
 Protocol values are taken from BuWizz's official 3.0 API document.
 
-Setup:
-    python3 -m pip install bleak
-    python3 buwizz_start.py
+Setup / run:
+    python3 -m pip install bleak                 # + adafruit-circuitpython-vl53l0x on the Pi
+    python3 DriveCar.py                           # 2-minute avoidance mission
+    python3 DriveCar.py --duration 60             # shorter run
+    python3 DriveCar.py --sensor-mm 250           # sensor trigger distance (mm)
+    python3 DriveCar.py --no-sensor               # stall detection only
+    python3 DriveCar.py --recalibrate             # recalibrate steering, then exit
+    python3 DriveCar.py --selftest                # fixed motion self-test
 
 Notes:
     - macOS: first run will prompt for Bluetooth permission for your terminal.
-    - Linux: uses BlueZ; connect from here, don't pair in system settings.
+    - Linux/Pi: uses BlueZ; connect from here, don't pair in system settings.
     - Do NOT name this file bleak.py.
 """
 
