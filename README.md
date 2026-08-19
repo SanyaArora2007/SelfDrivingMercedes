@@ -32,7 +32,7 @@ Raspberry Pi Zero 2 W (on the car)
 
 ### Running it
 
-On the Raspberry Pi use comman line arguments to run a specific file:
+On the Raspberry Pi, use command line arguments to run a specific file:
 
 ```bash
 cd ~/SelfDrivingMercedes           # wherever the code lives on the Pi
@@ -53,7 +53,7 @@ Useful command line arguments:
 
 ## Lego Modifications
 
-I have added three main things to this LEGO technic car:
+I have added three main things to this LEGO Technic car:
 
 - **Drive motor** — A LEGO **XL PoweredUp motor** that controls the movement of the car
 - **Steering motor** — A LEGO **L PoweredUp motor** that controls the sterring
@@ -62,13 +62,13 @@ I have added three main things to this LEGO technic car:
   car using a laser to detect objects
   
 One important thing about the steering motors is that it does **not** connect 1:1 to the
-wheel. The motos has to turn approximetely 6 degreees for every degree the wheels move,
-yielding a **6:1 ratio**. This is important because the moto's encoder measures the motors
-shaft, not the wheels, which is a big distcintion when it comes to the software.
+wheel. The motor has to turn approximately 6 degrees for every degree the wheels move,
+yielding a **6:1 ratio**. This is important because the motor's encoder measures the motor's
+shaft, not the wheels, which is a big distinction when it comes to the software.
 
 ---
 
-## BuWizz vs. other smart bricks — the control brick decision
+## BuWizz vs. other smart bricks
 
 I chose the **BuWizz 3.0 Pro** over othersmart-brick optionsbecause of what this project
 needed:
@@ -79,15 +79,15 @@ needed:
   and stall-based obstacle detection possible at all.
 - **On-board position/speed servo control.** The brick has a built-in PID
   controller per port, so I can command "steer to X degrees" and the brick
-  holds it at that speciic degree.
+  holds it at that specific degree.
 - **A documented BLE API.** This allows me to use Python to control the BuWizz using `bleak`.
 - **Plenty of current** for the drive and steering motors.
 
 ---
 
-## Steering and driving — two motors, two control modes
+## Steering and driving
 
-Both motos are plugges into seperate BuWizz pPowerUp ports, anf they are dirven in completely
+Both motors are plugged into separate BuWizz PowerUp ports, and they are driven in completely
 different ways:
 
 | | Drive motor (XL) | Steering motor (L) |
@@ -104,9 +104,9 @@ Python library, using the BuWizz 3.0 command set.
 ## Steering with degrees and calibration
 
 The steering motor runs in the Buwizz's **position-servo mode** and you can give it
-a specific angle in degreed, and its interned PID (Proportional Integral Derivative) drives
+a specific angle in degrees, and its internal PID (Proportional Integral Derivative) drives
 the wheels there and holds.
-Two thing to consider:
+Two things to consider:
 
 1. **The angle is in *motor* degrees, not wheel degrees.** Because of the ~6:1
    steering gearing, "45°" at the motor is only ~7–8° at the  wheels. The
@@ -114,21 +114,21 @@ Two thing to consider:
 2. **The encoder's zero is arbitrary each session** — it resets when the motor
    powers up, so the same "0°" doesn't mean "wheels straight" from run to run.
 
-At the begining the car has to **calibrate its own steering** so it knows which direction
-is straight. The calibrations works by:
+At the beginning, the car has to **calibrate its own steering** so it knows which direction
+is straight. The calibration works by:
 
-- Running the servo to each mechaincal end stop (all the way left and all the way right)
-- Using the two end stops it records the **center** (midpoint between the two) and the
-  **half-lock span** (how far full lock is from center, in motor degrees which is about
+- Running the servo to each mechanical end stop (all the way left and all the way right)
+- Using the two end stops, it records the **center** (midpoint between the two) and the
+  **half-lock span** (how far full lock is from center, in motor degrees, which is about
   ±137° on this build).
 ---
 
 ## Distance sensor
 
-The **VL53L0X laser distacne sensor** is a small chip that measure distance by timing a relfected
-infrared laser pulse. It reads around **5 cm when something is touching it**, and its maximum disatice is around **80 cm**.
+The **VL53L0X laser distance sensor** is a small chip that measures distance by timing a reflected
+infrared laser pulse. It reads around **5 cm when something is touching it**, and its maximum distance is around **80 cm**.
 
-In `DriveCar.py`, while driving forward the sensor is read every control tick.
+In `DriveCar.py`, while driving forward, the sensor is read every control tick.
 If it sees an obstacle within **`SENSOR_TRIGGER_MM`** (default **250 mm** ≈ 25 cm),
 the car triggers the *same* reverse-and-turn recovery as a physical hit, but
 **before** actually touching the obstacle.
@@ -140,10 +140,10 @@ to test if the sensor was working correctly (all the hardware was correctly in p
 
 ## Soldering
 
-The distacne sensor is connected to the Raspbery Pi using fine wires. To complete the cricuit
-and all the connections I has to solder the sesnro to the head (cotaining pins for the wires to attach). This was essential for the I²C to work
+The distacne sensor is connected to the Raspberry Pi using fine wires. To complete the circuit
+and all the connections, I had to solder the sensor to the head (containing pins for the wires to attach). This was essential for the I²C to work
 
-I tried very hard to use XSHUT, so that multiple sensors could be used on the same I²C bus. But either due to bad soldering or a bad part I couldn't get it to work.
+I tried very hard to use XSHUT, so that multiple sensors could be used on the same I²C bus. But either due to bad soldering or a bad part, I couldn't get it to work.
 
 ---
 
@@ -156,8 +156,8 @@ does two jobs at once:
 - **Controls the BuWizz** over Bluetooth LE, running `DriveCar.py`.
 
 The only way to run the sensor-based avoidance script is to run it **on the Pi** because
-the sensor is physically wired to the Pi'2 GPIO. I can still run the same script using my
-laptop, however, the car will run using collision detections insetad of obstacle avoidance.
+the sensor is physically wired to the Pi's GPIO. I can still run the same script using my
+laptop; however, the car will run using collision detections instead of obstacle avoidance.
 
 ---
 
@@ -179,17 +179,17 @@ The VL53L0X sensor is wired to the Raspberry Pi's 40-pin header like this:
 With a single sensor, XSHUT can be left unconnected — the sensor comes up at its
 default I²C address `0x29`.
 
-I found pin 1 by probing the powered Raspberry Pi's header with a multimeter until the corner pin read 3.3V. I knew 3.3V was important because pin 1 is always defined as a 3.3V power oin on the Pi's layout.
+I found pin 1 by probing the powered Raspberry Pi's header with a multimeter until the corner pin read 3.3V. I knew 3.3V was important because pin 1 is always defined as a 3.3V power pin on the Pi's layout.
 
 ---
 
 ## Future: multiple sensors with an I²C multiplexer (TCA9548A)
 
-Right now the car drives using **one** forward facing sensor. In the future I want to mount multiple sensors in different directions (front, back, side etc.) For this to be possible, I need multiple VL53L0X sensors. I tried the XSHUT methos to constantly turn on and off each sensor and cycle between them to get reading from all sensor. Since this didn't work, next time I would like to try and use an I²C multiplexer, so multiple sensors can be read together.
+Right now the car drives using **one** forward-facing sensor. In the future, I want to mount multiple sensors in different directions (front, back, side, etc.) For this to be possible, I need multiple VL53L0X sensors. I tried the XSHUT method to constantly turn each sensor on and off and cycle between them to get readings from all sensors. Since this didn't work, next time I would like to try and use an I²C multiplexer, so multiple sensors can be read together.
 
 ## Future: camera that detects my dog
 
-Every time I test my self-driving car my dog always runs away from it. I would like to try
+Every time I test my self-driving car, my dog always runs away from it. I would like to try
 and add a camera that uses an OpenCV model (compatible with this Raspberry Pi) to detect and
 avoid my scared dog. Turns out using a VLM (Vision Language Model) is not possible on this
 Raspberry Pi because of limited memory.
