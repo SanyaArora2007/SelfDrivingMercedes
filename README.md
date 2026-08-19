@@ -6,13 +6,13 @@ the car's drive and steering motors using Bluetooth. I have mounted a **Raspberr
 connected to a **distance sensor** on the front of the car, with its primary goal of
 detecting obstacles.
 
-`DriveCar.py` is the program that runs the car. When started, the car calibrates its steering
-using mechanical end stops. Then, using that calibration, the car cruises forward in a straight
-line. As the car moves, the front sensor is constantly checking the distance to obstacles in the
-front, and when there is an obstacle within its range, the car backs up and then turns a
-random direction, which allows the car to avoid the obstacle. Since I have only mounted one sensor,
-there is still a possibility of the car crashing, so there is the same logic applies when the
-drive motor stalls (indicating a collision).
+`DriveCar.py` is the program that runs the car. When started, the car calibrates its steering to find
+the center point between mechanical end stops. Then, using that calibration, the car cruises forward in a straight
+line. As the car moves, the front sensor checks the distance to obstacles in the
+front at 20Hz. When there is an obstacle within a specified range, the car backs up and then turns in a
+random direction, which allows it to avoid the obstacle. Since I have only mounted one sensor,
+there is still a possibility of the car crashing, so the same logic is applied when the
+drive motor stalls, indicating a collision.
 
 ```
 Raspberry Pi Zero 2 W (on the car)
@@ -26,7 +26,7 @@ Raspberry Pi Zero 2 W (on the car)
 
 | File | What it is |
 |---|---|
-| `DriveCar.py` | Main program: Controlled through bluetooth, steering calibration, obstacle-avoidance |
+| `DriveCar.py` | Main program: Controlled through Bluetooth, steering calibration, obstacle-avoidance |
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
 
