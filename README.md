@@ -1,5 +1,7 @@
 # Self-Driving Mercedes
 
+<img width="512" height="289" alt="FullCarPicture" src="https://github.com/user-attachments/assets/a09e6237-1174-4de6-a0fb-83b8f9404a5e" />
+
 This self-driving Mercedes handles obstacle avoidance and collision detection.
 The car is powered by A **BuWizz 3.0 Pro**, which is a brick that powers and controls
 the car's drive and steering motors using Bluetooth. I have mounted a **Raspberry Pi**
@@ -20,6 +22,8 @@ Raspberry Pi Zero 2 W (on the car)
    ├── I²C ───────────► VL53L0X distance sensor (front)
    └── Bluetooth LE ──► BuWizz 3.0 Pro ──► XL drive motor + L steering motor
 ```
+
+Click [here](https://youtu.be/4X625ZH-nY0) to see a video.
 
 ---
 
@@ -42,7 +46,7 @@ sudo hciconfig hci0 up             # only if the Bluetooth adapter is "DOWN"
 python3 DriveCar.py --duration 60  # 60-second obstacle-avoidance run
 ```
 
-Useful command line arguments:
+Useful command-line arguments:
 
 | Flag | Effect |
 |---|---|
@@ -126,6 +130,8 @@ is straight. The calibration works by:
 
 ## Distance sensor
 
+<img width="403" height="227" alt="DistanceSensor" src="https://github.com/user-attachments/assets/878e1417-0608-4d66-b931-889980dd6d92" />
+
 The **VL53L0X laser distance sensor** is a small chip that measures distance by timing a reflected
 infrared laser pulse. It reads around **5 cm when something is touching it**, and its maximum distance is around **80 cm**.
 
@@ -145,12 +151,15 @@ The distacne sensor is connected to the Raspberry Pi using fine wires. To comple
 and all the connections, I had to solder the sensor to the head (containing pins for the wires to attach).
 This was essential for the I²C to work
 
-I tried hard to use XSHUT, so that multiple sensors could be used on the same I²C bus. But either due to
+I tried hard to use XSHUT so that multiple sensors could be used on the same I²C bus. But either due to
 bad soldering or a bad part, I couldn't get it to work.
 
 ---
 
 ## Raspberry Pi
+
+<img width="403" height="227" alt="RaspberryPi" src="https://github.com/user-attachments/assets/dfd49956-c2ec-4539-bd1f-3f7fadb2f2b1" />
+
 
 A **Raspberry Pi** rides on the car and is the actual "self-driving" computer. It
 does two jobs at once:
