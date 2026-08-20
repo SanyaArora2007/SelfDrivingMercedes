@@ -1,10 +1,11 @@
 # Self-Driving Mercedes
 
-This self-driving LEGO Mercedes handles obstacle avoidance and collision detection.
+This self-driving Mercedes handles obstacle avoidance and collision detection.
 The car is powered by A **BuWizz 3.0 Pro**, which is a brick that powers and controls
 the car's drive and steering motors using Bluetooth. I have mounted a **Raspberry Pi**
 connected to a **distance sensor** on the front of the car, with its primary goal of
-detecting obstacles.
+detecting obstacles. Built on a LEGO platform, this Mercedes has several custom aftermarket mods
+to accommodate the motors and their connections to the steering and drivetrain.
 
 `DriveCar.py` is the program that runs the car. When started, the car calibrates its steering to find
 the center point between mechanical end stops. Then, using that calibration, the car cruises forward in a straight
@@ -26,13 +27,13 @@ Raspberry Pi Zero 2 W (on the car)
 
 | File | What it is |
 |---|---|
-| `DriveCar.py` | Main program: Controlled through Bluetooth, steering calibration, obstacle-avoidance |
+| `DriveCar.py` | Main program: Controlled through Bluetooth, steering calibration, obstacle avoidance |
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
 
 ### Running it
 
-On the Raspberry Pi, use command line arguments to run a specific file:
+On the Raspberry Pi, use command-line arguments to run a specific file:
 
 ```bash
 cd ~/SelfDrivingMercedes           # wherever the code lives on the Pi
@@ -51,7 +52,7 @@ Useful command line arguments:
 
 ---
 
-## Lego Modifications
+## LEGO Modifications
 
 I have added three main things to this LEGO Technic car:
 
@@ -70,7 +71,7 @@ shaft, not the wheels, which is a big distinction when it comes to the software.
 
 ## BuWizz vs. other smart bricks
 
-I chose the **BuWizz 3.0 Pro** over othersmart-brick optionsbecause of what this project
+I chose the **BuWizz 3.0 Pro** over other smart-brick options because of what this project
 needed:
 
 - **PoweredUp motor support with encoders.** The BuWizz reads each PoweredUp
@@ -103,16 +104,16 @@ Python library, using the BuWizz 3.0 command set.
 
 ## Steering with degrees and calibration
 
-The steering motor runs in the Buwizz's **position-servo mode** and you can give it
+The steering motor runs in the Buwizz's **position-servo mode**, and you can give it
 a specific angle in degrees, and its internal PID (Proportional Integral Derivative) drives
 the wheels there and holds.
 Two things to consider:
 
 1. **The angle is in *motor* degrees, not wheel degrees.** Because of the ~6:1
-   steering gearing, "45°" at the motor is only ~7–8° at the  wheels. The
+   steering gearing, "45 degrees" at the motor is only ~7-8 degrees at the  wheels. The
    encoder can only see the motor shaft.
 2. **The encoder's zero is arbitrary each session** — it resets when the motor
-   powers up, so the same "0°" doesn't mean "wheels straight" from run to run.
+   powers up, so the same "0 degrees" doesn't mean "wheels straight" from run to run.
 
 At the beginning, the car has to **calibrate its own steering** so it knows which direction
 is straight. The calibration works by:
@@ -120,7 +121,7 @@ is straight. The calibration works by:
 - Running the servo to each mechanical end stop (all the way left and all the way right)
 - Using the two end stops, it records the **center** (midpoint between the two) and the
   **half-lock span** (how far full lock is from center, in motor degrees, which is about
-  ±137° on this build).
+  +/-137 degrees on this car).
 ---
 
 ## Distance sensor
@@ -133,7 +134,7 @@ If it sees an obstacle within **`SENSOR_TRIGGER_MM`** (default **250 mm** ≈ 25
 the car triggers the *same* reverse-and-turn recovery as a physical hit, but
 **before** actually touching the obstacle.
 
-`sensor-test.py` is a standalone script that just prints the live distance, which was useful
+`sensor-test.py` is a standalone script that prints the live distance, which was useful
 to test if the sensor was working correctly (all the hardware was correctly in place).
 
 ---
@@ -141,9 +142,11 @@ to test if the sensor was working correctly (all the hardware was correctly in p
 ## Soldering
 
 The distacne sensor is connected to the Raspberry Pi using fine wires. To complete the circuit
-and all the connections, I had to solder the sensor to the head (containing pins for the wires to attach). This was essential for the I²C to work
+and all the connections, I had to solder the sensor to the head (containing pins for the wires to attach).
+This was essential for the I²C to work
 
-I tried very hard to use XSHUT, so that multiple sensors could be used on the same I²C bus. But either due to bad soldering or a bad part, I couldn't get it to work.
+I tried hard to use XSHUT, so that multiple sensors could be used on the same I²C bus. But either due to
+bad soldering or a bad part, I couldn't get it to work.
 
 ---
 
