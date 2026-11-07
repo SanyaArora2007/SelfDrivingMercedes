@@ -18,6 +18,7 @@ Setup / run:
     python3 DriveServer.py --port 8080
 
 Endpoints:
+    WS   /ws/logs                   live server log, one text message per line
     POST /run                       start a mission with the default duration
     POST /run  {"duration": 60}     same as `DriveCar.py --duration 60`
     POST /recenter                  re-find the steering center now
@@ -32,18 +33,20 @@ for their work to finish. Every endpoint replies 409 while the car is busy
 While idle the server keeps feeding the BuWizz watchdog, which otherwise trips
 a few seconds after the last command and drops the BLE connection. Only the
 watchdog is fed -- no motor commands -- so the car still stops if this process
-dies. Console output is timestamped.
+dies. Console output is timestamped, and also streamed to /ws/logs; this
+needs the server started as `python3 DriveServer.py` (not via the uvicorn CLI).
 """
 
 import argparse
 import asyncio
 import sys
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 import car_control
@@ -57,21 +60,58 @@ car_lock = asyncio.Lock()
 # request can be refused while the car is busy.
 mission_task: Optional[asyncio.Task] = None
 
+class LogHub:
+    """Fans complete console lines out to WebSocket viewers, keeping recent
+    history for viewers that join later."""
+
+    def __init__(self, history=500, backlog=1000):
+        self.history = deque(maxlen=history)
+        self.backlog = backlog
+        self.queues = set()
+
+    def publish(self, line):
+        self.history.append(line)
+        for q in self.queues:
+            try:
+                q.put_nowait(line)
+            except asyncio.QueueFull:
+                pass                               # a stalled viewer misses lines
+
+    def subscribe(self):
+        """Return (recent history, queue of new lines). No await in here, so no
+        line can land in both."""
+        q = asyncio.Queue(maxsize=self.backlog)
+        self.queues.add(q)
+        return list(self.history), q
+
+    def unsubscribe(self, q):
+        self.queues.discard(q)
+
+
+log_hub = LogHub()
+
 
 class Timestamped:
-    """Wraps a text stream so every line written to it starts with HH:MM:SS."""
+    """Wraps a text stream so every line written to it starts with HH:MM:SS,
+    and passes each complete line on to the log hub."""
 
     def __init__(self, stream):
         self.stream = stream
         self.at_line_start = True
+        self.partial = ""
 
     def write(self, text):
         out = []
         for line in text.splitlines(keepends=True):
             if self.at_line_start:
-                out.append(time.strftime("%H:%M:%S "))
+                line = time.strftime("%H:%M:%S ") + line
             out.append(line)
             self.at_line_start = line.endswith("\n")
+            if self.at_line_start:
+                log_hub.publish(self.partial + line.rstrip("\n"))
+                self.partial = ""
+            else:
+                self.partial += line
         self.stream.write("".join(out))
         return len(text)
 
@@ -167,6 +207,30 @@ class RunRequest(BaseModel):
 def steering():
     return {"center": car_control.steer_cal["center"],
             "half": car_control.steer_cal["half"]}
+
+
+@app.websocket("/ws/logs")
+async def logs_ws(ws: WebSocket):
+    await ws.accept()
+    history, q = log_hub.subscribe()
+
+    async def pump():
+        for line in history:
+            await ws.send_text(line)
+        while True:
+            await ws.send_text(await q.get())
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        # Waiting on the socket notices a closed page right away; otherwise
+        # we'd only find out on the next send. Incoming text is ignored.
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass                                       # viewer closed the page
+    finally:
+        pump_task.cancel()
+        log_hub.unsubscribe(q)
 
 
 @app.post("/run", status_code=202)
