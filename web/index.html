@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Driving Mercedes</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7385;
+    --border: #dde1e8;
+    --log-bg: #11151c;
+    --log-text: #d6dbe4;
+    --log-dim: #7d8696;
+    --warn: #f0b429;
+    --error: #ff6b6b;
+    --ok: #2f9e44;
+    --off: #c92a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1016;
+      --panel: #161b24;
+      --text: #e4e8ef;
+      --muted: #8a93a5;
+      --border: #262d3a;
+      --log-bg: #0a0d12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 20px; margin: 0; flex: 1; }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--off);
+  }
+  .status.live .dot { background: var(--ok); }
+  button {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+  }
+  #log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--log-bg);
+    color: var(--log-text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #log .dim   { color: var(--log-dim); }
+  #log .warn  { color: var(--warn); }
+  #log .error { color: var(--error); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Self-Driving Mercedes</h1>
+    <span id="status" class="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
+    <button id="clear" type="button">Clear</button>
+  </header>
+  <pre id="log" aria-live="polite"></pre>
+</main>
+<script>
+  const MAX_LINES = 3000;  // keep the page responsive on long sessions
+  const log = document.getElementById("log");
+  const status = document.getElementById("status");
+  const statusText = document.getElementById("status-text");
+  document.getElementById("clear").onclick = () => { log.textContent = ""; };
+
+  function classify(line) {
+    if (/Traceback|Error|failed|Aborting/i.test(line)) return "error";
+    if (/\[!\]|\s! /.test(line)) return "warn";
+    if (/INFO:|pwm=|vbat=|probe [+-]:/.test(line)) return "dim";
+    return "";
+  }
+
+  function append(line) {
+    // Only follow the bottom if the viewer hasn't scrolled up to read.
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    const div = document.createElement("div");
+    div.textContent = line;
+    const cls = classify(line);
+    if (cls) div.className = cls;
+    log.appendChild(div);
+    while (log.childElementCount > MAX_LINES) log.firstElementChild.remove();
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  function setStatus(live, text) {
+    status.classList.toggle("live", live);
+    statusText.textContent = text;
+  }
+
+  let retry = 1000;
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
+    ws.onopen = () => {
+      retry = 1000;
+      log.textContent = "";   // the server replays recent history on connect
+      setStatus(true, "live");
+    };
+    ws.onmessage = (e) => append(e.data);
+    ws.onclose = () => {
+      setStatus(false, `disconnected — retrying in ${retry / 1000}s`);
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 10000);
+    };
+  }
+  connect();
+</script>
+</body>
+</html>

@@ -18,6 +18,7 @@ Setup / run:
     python3 DriveServer.py --port 8080
 
 Endpoints:
+    GET  /                          web page showing the live server log
     WS   /ws/logs                   live server log, one text message per line
     POST /run                       start a mission with the default duration
     POST /run  {"duration": 60}     same as `DriveCar.py --duration 60`
@@ -33,12 +34,13 @@ for their work to finish. Every endpoint replies 409 while the car is busy
 While idle the server keeps feeding the BuWizz watchdog, which otherwise trips
 a few seconds after the last command and drops the BLE connection. Only the
 watchdog is fed -- no motor commands -- so the car still stops if this process
-dies. Console output is timestamped, and also streamed to /ws/logs; this
+dies. Console output is timestamped, and also streamed to the web page; this
 needs the server started as `python3 DriveServer.py` (not via the uvicorn CLI).
 """
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 from collections import deque
@@ -47,6 +49,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 import car_control
@@ -59,6 +62,10 @@ car_lock = asyncio.Lock()
 # The in-flight mission, if any. Kept so it isn't garbage-collected and so a
 # request can be refused while the car is busy.
 mission_task: Optional[asyncio.Task] = None
+
+INDEX_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "web", "index.html")
+
 
 class LogHub:
     """Fans complete console lines out to WebSocket viewers, keeping recent
@@ -207,6 +214,12 @@ class RunRequest(BaseModel):
 def steering():
     return {"center": car_control.steer_cal["center"],
             "half": car_control.steer_cal["half"]}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def index():
+    with open(INDEX_HTML) as f:
+        return f.read()
 
 
 @app.websocket("/ws/logs")

@@ -34,6 +34,7 @@ Click [here](https://youtu.be/4X625ZH-nY0) to see a video.
 | `DriveCar.py` | Main program: Controlled through Bluetooth, steering calibration, obstacle avoidance |
 | `DriveServer.py` | Web server: starts the same obstacle-avoidance run over HTTP (`POST /run`, `POST /recenter`) |
 | `car_control.py` | Shared library used by `DriveCar.py` and `DriveServer.py` |
+| `web/index.html` | Web page served by `DriveServer.py` at `/`: live log of the car's actions |
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
 | `requirements.txt` | Python packages to install into the venv |
