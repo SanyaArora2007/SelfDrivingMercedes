@@ -14,8 +14,9 @@ the watchdog, so a button press never waits on Bluetooth.
 
 The loop also enforces three safety stops, all of which drop the speed to 0:
     - dead-man: nothing heard from the controlling page for DEADMAN_S seconds
-    - front sensor: an obstacle within SENSOR_TRIGGER_MM while going forward
-      (reverse still works, so the car can back away)
+    - front sensor: an obstacle within stop_distance() while going forward --
+      further away the faster the car is going (reverse still works, so the
+      car can back away)
     - stall: drive power on but the drive motor not turning (see
       car_control.StallDetector), e.g. pushing against something
 """
@@ -38,11 +39,30 @@ STEER_LEVELS = 2       # levels each side of center; the last one is full lock
 DEADMAN_S = 1.0        # stop driving if the page goes quiet this long
 LOOP_HZ = 20
 
+# The front-sensor stop distance grows with the measured drive speed: the car
+# covers more ground between sensor readings, and coasts or brakes further,
+# when it's going faster. Linear from STOP_MM_SLOW at the slowest speed (vel
+# about 25 at PWM 84) to STOP_MM_FAST at full speed (vel about 110 at PWM 120).
+STOP_MM_SLOW, STOP_MM_FAST = 200, 350
+STOP_VEL_SLOW, STOP_VEL_FAST = 25, 110
+# Brake flag for the drive port in motor packets: with it set, zero power
+# brakes the motor instead of letting it coast. Used after a safety stop.
+DRIVE_BRAKE = 1 << (DRIVE_PORT - 1)
+
 
 def speed_pwm(level):
     """Drive PWM for a signed speed level."""
     pwm = SPEED_PWM[abs(level)]
     return pwm if level >= 0 else -pwm
+
+
+def stop_distance(vel):
+    """Front-sensor stop distance (mm) for a measured drive velocity; the
+    longest if the velocity isn't known."""
+    if vel is None:
+        return STOP_MM_FAST
+    frac = (abs(vel) - STOP_VEL_SLOW) / (STOP_VEL_FAST - STOP_VEL_SLOW)
+    return round(STOP_MM_SLOW + max(0.0, min(1.0, frac)) * (STOP_MM_FAST - STOP_MM_SLOW))
 
 
 def steer_frac(level):
@@ -63,6 +83,7 @@ class ManualDriver:
         self.on_safety_stop = on_safety_stop
         self.on_stall = on_stall
         self._stall = car_control.StallDetector()
+        self._braking = False          # brake (not coast) while the drive is off
         self.speed = 0                 # -SPEED_LEVELS .. +SPEED_LEVELS
         self.steer = 0                 # -STEER_LEVELS .. +STEER_LEVELS
         self.last_heard = time.time()
@@ -102,6 +123,8 @@ class ManualDriver:
     def set_speed(self, level):
         """Jump straight to a speed level (clamped to the range)."""
         self.speed = max(-SPEED_LEVELS, min(SPEED_LEVELS, level))
+        if self.speed != 0:
+            self._braking = False
 
     def set_steer(self, level):
         """Jump straight to a steering level (clamped to the range)."""
@@ -117,7 +140,8 @@ class ManualDriver:
                     self._safety_stops()
                     await send(self.client, self.char, motor_ext_packet({
                         DRIVE_PORT: speed_pwm(self.speed),
-                        STEER_PORT: int(steer_target(steer_frac(self.steer)))}))
+                        STEER_PORT: int(steer_target(steer_frac(self.steer)))},
+                        brake=DRIVE_BRAKE if self._braking else 0))
                     now = time.time()
                     if now - last_feed > WATCHDOG_FEED:
                         await feed_watchdog(self.client, self.char)
@@ -138,8 +162,11 @@ class ManualDriver:
             self._safety_stop(f"no word from the page for {DEADMAN_S:.0f} s")
         if self.speed > 0:
             d = car_control.read_distance()
-            if d is not None and d <= car_control.SENSOR_TRIGGER_MM:
-                self._safety_stop(f"front sensor {d} mm")
+            vel = car_control.drive_vel()
+            limit = stop_distance(vel)
+            if d is not None and d <= limit:
+                self._safety_stop(f"front sensor {d} mm (limit {limit} mm "
+                                  f"at vel {vel})")
         pwm, vel = speed_pwm(self.speed), car_control.drive_vel()
         if self._stall.update(pwm, vel):
             if self.on_stall is not None:
@@ -147,9 +174,11 @@ class ManualDriver:
             self._safety_stop("drive stalled")
 
     def _safety_stop(self, reason):
+        """Cut the drive and brake it, until the next Forward or Reverse."""
         print(f"    ! {reason} -> manual stop")
         speed = self.speed
         self.set_speed(0)
+        self._braking = True
         if self.on_safety_stop is not None:
             self.on_safety_stop(reason, speed)
 
