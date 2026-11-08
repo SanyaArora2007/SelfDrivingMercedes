@@ -23,6 +23,7 @@ This module has no entry point of its own; it is used by:
                       and calls connect(), home_steering(), drive_session()
                       and disconnect() separately, so the steering is homed
                       once per connection, not per run
+    manual_control  - remote-control driving for DriveServer.py
 
 Notes:
     - macOS: first run will prompt for Bluetooth permission for your terminal.

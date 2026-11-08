@@ -11,6 +11,8 @@
     --text: #1d2330;
     --muted: #6b7385;
     --border: #dde1e8;
+    --seg: #e6e9ef;
+    --accent: #2f6fdb;
     --log-bg: #11151c;
     --log-text: #d6dbe4;
     --log-dim: #7d8696;
@@ -18,6 +20,7 @@
     --error: #ff6b6b;
     --ok: #2f9e44;
     --off: #c92a2a;
+    --stop: #d6336c;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -26,6 +29,8 @@
       --text: #e4e8ef;
       --muted: #8a93a5;
       --border: #262d3a;
+      --seg: #232a36;
+      --accent: #5b8def;
       --log-bg: #0a0d12;
     }
   }
@@ -43,7 +48,6 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-    height: 100vh;
   }
   header {
     display: flex;
@@ -52,6 +56,8 @@
     flex-wrap: wrap;
   }
   h1 { font-size: 20px; margin: 0; flex: 1; }
+  h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .04em; }
   .status {
     display: inline-flex;
     align-items: center;
@@ -74,9 +80,69 @@
     color: var(--text);
     cursor: pointer;
   }
+  button:disabled { opacity: .4; cursor: default; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .control {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 76px);
+    grid-template-rows: repeat(3, 56px);
+    gap: 6px;
+  }
+  .pad button { font-size: 14px; padding: 0; }
+  .pad .up    { grid-area: 1 / 2; }
+  .pad .left  { grid-area: 2 / 1; }
+  .pad .stop  { grid-area: 2 / 2; background: var(--stop); border-color: var(--stop);
+                color: #fff; font-weight: 700; }
+  .pad .right { grid-area: 2 / 3; }
+  .pad .down  { grid-area: 3 / 2; }
+  .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #engage.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mode { font-size: 13px; color: var(--muted); }
+  .mode b { color: var(--text); }
+  .gauge { display: grid; grid-template-columns: 70px 1fr; gap: 4px 10px;
+           align-items: center; font-size: 13px; }
+  .gauge .label { color: var(--muted); }
+  .segs { display: flex; gap: 3px; }
+  .segs span { flex: 1; height: 14px; border-radius: 3px; background: var(--seg); }
+  .segs span.zero { flex: 0 0 6px; }
+  .segs.clickable span { height: 22px; cursor: pointer; }
+  .segs.clickable span.zero { flex-basis: 12px; }
+  .segs.clickable span:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .segs span.on { background: var(--accent); }
+  .segs span.actual { outline: 2px solid var(--warn); outline-offset: -2px; }
+  .gauge .val { grid-column: 2; color: var(--muted); font-size: 12px;
+                font-variant-numeric: tabular-nums; }
+  .tele {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .tele .panel { padding: 10px 12px; }
+  .tele dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px;
+             font-size: 13px; }
+  .tele dt { color: var(--muted); }
+  .tele dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .tele dd.alert { color: var(--off); font-weight: 600; }
+  #msg { font-size: 13px; min-height: 18px; color: var(--muted); }
+  #msg.error { color: var(--off); }
+  .hint { font-size: 12px; color: var(--muted); }
+  .logbar { display: flex; align-items: center; gap: 12px; }
+  .logbar h2 { flex: 1; margin: 0; }
   #log {
-    flex: 1;
-    min-height: 0;
+    height: 45vh;
+    min-height: 200px;
     overflow-y: auto;
     margin: 0;
     padding: 10px 12px;
@@ -91,6 +157,11 @@
   #log .dim   { color: var(--log-dim); }
   #log .warn  { color: var(--warn); }
   #log .error { color: var(--error); }
+  @media (max-width: 760px) {
+    .control { grid-template-columns: 1fr; justify-items: center; }
+    .side { width: 100%; }
+    .tele { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
 </style>
 </head>
 <body>
@@ -98,19 +169,72 @@
   <header>
     <h1>Self-Driving Mercedes</h1>
     <span id="status" class="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
-    <button id="clear" type="button">Clear</button>
+    <button id="connect" type="button" disabled>Connect car</button>
+    <button id="disconnect" type="button" disabled>Disconnect car</button>
   </header>
+
+  <section class="panel control">
+    <div class="pad">
+      <button class="up" data-cmd="speed_up" type="button" disabled>▲ Forward</button>
+      <button class="left" data-cmd="turn_left" type="button" disabled>◀ Left</button>
+      <button class="stop" data-cmd="all_stop" type="button" disabled>STOP</button>
+      <button class="right" data-cmd="turn_right" type="button" disabled>Right ▶</button>
+      <button class="down" data-cmd="slow_down" type="button" disabled>▼ Reverse</button>
+    </div>
+    <div class="side">
+      <div class="row">
+        <button id="engage" type="button" disabled>Take control</button>
+        <button id="recenter" type="button" disabled>Recenter steering</button>
+        <span class="mode">Car: <b id="mode">—</b></span>
+      </div>
+      <div class="gauge">
+        <span class="label">Speed</span><div class="segs" id="speed-segs" data-cmd="set_speed"></div>
+        <span class="val" id="speed-val">—</span>
+        <span class="label">Steering</span><div class="segs" id="steer-segs" data-cmd="set_steer"></div>
+        <span class="val" id="steer-val">—</span>
+      </div>
+      <div id="msg"></div>
+      <div class="hint">While in control: click the speed or steering bar to jump to a setting. Keys: ↑ ↓ speed, ← → steer, space = stop.</div>
+    </div>
+  </section>
+
+  <section class="tele">
+    <div class="panel"><h2>Drive motor</h2><dl>
+      <dt>Speed</dt><dd id="t-vel">—</dd>
+      <dt>Current</dt><dd id="t-drive-a">—</dd>
+      <dt>Power</dt><dd id="t-power">—</dd>
+    </dl></div>
+    <div class="panel"><h2>Steering motor</h2><dl>
+      <dt>Angle</dt><dd id="t-angle">—</dd>
+      <dt>Current</dt><dd id="t-steer-a">—</dd>
+    </dl></div>
+    <div class="panel"><h2>Battery</h2><dl>
+      <dt>Voltage</dt><dd id="t-vbat">—</dd>
+      <dt>Temp</dt><dd id="t-temp">—</dd>
+      <dt>Brick error</dt><dd id="t-err">—</dd>
+    </dl></div>
+    <div class="panel"><h2>Front sensor</h2><dl>
+      <dt>Distance</dt><dd id="t-mm">—</dd>
+      <dt>Stops at</dt><dd id="t-trigger">—</dd>
+    </dl></div>
+  </section>
+
+  <div class="logbar">
+    <h2>Log</h2>
+    <button id="clear" type="button">Clear</button>
+  </div>
   <pre id="log" aria-live="polite"></pre>
 </main>
 <script>
+  const $ = (id) => document.getElementById(id);
+
+  // ---- live log (/ws/logs) ------------------------------------------------
   const MAX_LINES = 3000;  // keep the page responsive on long sessions
-  const log = document.getElementById("log");
-  const status = document.getElementById("status");
-  const statusText = document.getElementById("status-text");
-  document.getElementById("clear").onclick = () => { log.textContent = ""; };
+  const log = $("log");
+  $("clear").onclick = () => { log.textContent = ""; };
 
   function classify(line) {
-    if (/Traceback|Error|failed|Aborting/i.test(line)) return "error";
+    if (/Traceback|Error|failed|Aborting|aborted/i.test(line)) return "error";
     if (/\[!\]|\s! /.test(line)) return "warn";
     if (/INFO:|pwm=|vbat=|probe [+-]:/.test(line)) return "dim";
     return "";
@@ -128,28 +252,186 @@
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
 
-  function setStatus(live, text) {
-    status.classList.toggle("live", live);
-    statusText.textContent = text;
+  // Open a WebSocket and reopen it with backoff whenever it closes.
+  function keepOpen(path, handlers) {
+    let retry = 1000;
+    function open() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}${path}`);
+      ws.onopen = () => { retry = 1000; handlers.open(ws); };
+      ws.onmessage = (e) => handlers.message(e.data);
+      ws.onclose = () => {
+        handlers.close(retry);
+        setTimeout(open, retry);
+        retry = Math.min(retry * 2, 10000);
+      };
+    }
+    open();
   }
 
-  let retry = 1000;
-  function connect() {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/ws/logs`);
-    ws.onopen = () => {
-      retry = 1000;
-      log.textContent = "";   // the server replays recent history on connect
-      setStatus(true, "live");
-    };
-    ws.onmessage = (e) => append(e.data);
-    ws.onclose = () => {
-      setStatus(false, `disconnected — retrying in ${retry / 1000}s`);
-      setTimeout(connect, retry);
-      retry = Math.min(retry * 2, 10000);
+  keepOpen("/ws/logs", {
+    open: () => { log.textContent = ""; },  // the server replays recent history
+    message: append,
+    close: () => {},
+  });
+
+  // ---- control and state (/ws/control) ------------------------------------
+  let control = null;      // the open control socket, if any
+  let state = null;        // the latest {"type": "state"} message
+
+  function send(cmd, extra = {}) {
+    if (control && control.readyState === WebSocket.OPEN) {
+      control.send(JSON.stringify({ cmd, ...extra }));
+    }
+  }
+
+  function setStatus(live, text) {
+    $("status").classList.toggle("live", live);
+    $("status-text").textContent = text;
+  }
+
+  let msgTimer = null;
+  function showMsg(text, isError) {
+    const el = $("msg");
+    el.textContent = text;
+    el.className = isError ? "error" : "";
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => { el.textContent = ""; }, 6000);
+  }
+
+  keepOpen("/ws/control", {
+    open: (ws) => { control = ws; setStatus(true, "server live"); },
+    message: (data) => {
+      const msg = JSON.parse(data);
+      if (msg.type === "error") showMsg(msg.msg, true);
+      else if (msg.type === "state") { state = msg; render(); }
+    },
+    close: (retry) => {
+      control = null;
+      state = null;
+      render();
+      setStatus(false, `server unreachable — retrying in ${retry / 1000}s`);
+    },
+  });
+
+  // Heartbeat: manual driving stops if the server stops hearing from us.
+  setInterval(() => send("ping"), 250);
+
+  // Segmented bar from -n..+n; lights 0..level, rings the actual position.
+  function segments(el, n, level, actual) {
+    if (el.childElementCount !== 2 * n + 1) {
+      el.textContent = "";
+      for (let i = -n; i <= n; i++) {
+        const s = document.createElement("span");
+        s.dataset.level = i;
+        if (i === 0) s.className = "zero";
+        el.appendChild(s);
+      }
+    }
+    [...el.children].forEach((s, idx) => {
+      const i = idx - n;
+      const on = level !== null && i !== 0 &&
+                 ((level > 0 && i > 0 && i <= level) || (level < 0 && i < 0 && i >= level));
+      s.classList.toggle("on", on);
+      s.classList.toggle("actual", actual !== null && i === actual && i !== 0);
+    });
+  }
+
+  const fmt = (v, unit, digits = 2) =>
+    v === null || v === undefined ? "—" : `${Number(v).toFixed(digits)} ${unit}`;
+
+  function render() {
+    const s = state;
+    const connected = !!(s && s.connected);
+    const controller = !!(s && s.controller);
+    const free = s && !s.busy;
+
+    $("mode").textContent = !s ? "—"
+      : s.mode === "manual" ? (controller ? "manual (you)" : "manual (another page)")
+      : s.mode;
+    $("connect").disabled = !s || connected || !free;
+    $("disconnect").disabled = !connected || !free;
+    $("recenter").disabled = !connected || !(free || controller);
+    const engage = $("engage");
+    engage.disabled = !connected || !(free || controller);
+    engage.textContent = controller ? "Release control" : "Take control";
+    engage.classList.toggle("on", controller);
+    document.querySelectorAll(".pad button").forEach((b) => { b.disabled = !controller; });
+    for (const [id, what] of [["speed-segs", "speed"], ["steer-segs", "steering"]]) {
+      $(id).classList.toggle("clickable", controller);
+      $(id).title = controller ? `Click a segment to jump to that ${what}` : "";
+    }
+
+    const lim = s ? s.limits : { speed_levels: 6, steer_levels: 2 };
+    const m = s && s.manual;
+    segments($("speed-segs"), lim.speed_levels, m ? m.speed_level : null, null);
+    const actualFrac = s && s.steer.actual_frac;
+    const actualLevel = actualFrac === null || actualFrac === undefined ? null
+      : Math.max(-lim.steer_levels, Math.min(lim.steer_levels,
+                 Math.round(actualFrac * lim.steer_levels)));
+    segments($("steer-segs"), lim.steer_levels, m ? m.steer_level : null, actualLevel);
+    $("speed-val").textContent = !m ? "not under manual control"
+      : m.speed_level === 0 ? "stopped"
+      : `${m.speed_level > 0 ? "forward" : "reverse"} ${Math.abs(m.speed_level)}/${lim.speed_levels}  (pwm ${m.speed_pwm})`;
+    const steerWord = (l) => l === 0 ? "straight" : `${l > 0 ? "right" : "left"} ${Math.abs(l)}/${lim.steer_levels}`;
+    $("steer-val").textContent = (m ? `set ${steerWord(m.steer_level)}` : "—") +
+      (actualFrac === null || actualFrac === undefined ? ""
+        : `  ·  actual ${actualFrac >= 0 ? "+" : ""}${Math.round(actualFrac * 100)}% lock`);
+
+    const d = s ? s.drive : {}, st = s ? s.steer : {}, b = s ? s.battery : {}, se = s ? s.sensor : {};
+    $("t-vel").textContent = d.vel === null || d.vel === undefined ? "—" : String(d.vel);
+    $("t-drive-a").textContent = fmt(d.current_a, "A");
+    $("t-power").textContent = fmt(d.power_w, "W", 1);
+    $("t-angle").textContent = st.pos_deg === null || st.pos_deg === undefined ? "—" : `${st.pos_deg}° motor`;
+    $("t-steer-a").textContent = fmt(st.current_a, "A");
+    $("t-vbat").textContent = fmt(b.vbat, "V");
+    $("t-temp").textContent = fmt(b.temp_c, "°C", 0);
+    $("t-err").textContent = b.error === null || b.error === undefined ? "—" : (b.error ? "YES" : "no");
+    $("t-err").classList.toggle("alert", !!b.error);
+    $("t-mm").textContent = !s ? "—" : !se.present ? "no sensor" : fmt(se.mm, "mm", 0);
+    $("t-mm").classList.toggle("alert", !!se.blocked);
+    $("t-trigger").textContent = s ? `≤ ${se.trigger_mm} mm` : "—";
+  }
+  render();
+
+  document.querySelectorAll(".pad button").forEach((b) => {
+    b.onclick = () => send(b.dataset.cmd);
+  });
+  // Click a segment to jump straight to that level (the middle one is stop /
+  // straight ahead).
+  for (const bar of [$("speed-segs"), $("steer-segs")]) {
+    bar.onclick = (e) => {
+      const level = e.target.dataset.level;
+      if (level !== undefined && state && state.controller) {
+        send(bar.dataset.cmd, { level: Number(level) });
+      }
     };
   }
-  connect();
+  $("engage").onclick = () => send(state && state.controller ? "release" : "engage");
+
+  async function post(path, busyText) {
+    showMsg(busyText, false);
+    try {
+      const r = await fetch(path, { method: "POST" });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) showMsg(`${path}: ${body.status || "ok"}`, false);
+      else showMsg(`${path}: ${body.detail || r.statusText}`, true);
+    } catch (e) {
+      showMsg(`${path}: ${e}`, true);
+    }
+  }
+  $("recenter").onclick = () => post("/recenter", "Recentering the steering…");
+  $("connect").onclick = () => post("/connect", "Connecting to the car…");
+  $("disconnect").onclick = () => post("/disconnect", "Disconnecting…");
+
+  const KEYS = { ArrowUp: "speed_up", ArrowDown: "slow_down",
+                 ArrowLeft: "turn_left", ArrowRight: "turn_right", " ": "all_stop" };
+  document.addEventListener("keydown", (e) => {
+    const cmd = KEYS[e.key];
+    if (!cmd || !(state && state.controller) || e.repeat) return;
+    e.preventDefault();
+    send(cmd);
+  });
 </script>
 </body>
 </html>
