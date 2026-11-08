@@ -84,7 +84,7 @@ import car_control
 import manual_control
 from car_control import MISSION_TIME
 from manual_control import ManualDriver
-from telemetry import Telemetry
+from telemetry import Telemetry, stall_detail
 
 # The one BuWizz connection, and whether the steering has been homed on it.
 car = {"client": None, "char": None, "homed": False}
@@ -316,7 +316,8 @@ async def lifespan(_app):
         except ConnectionError as e:
             print(f"Startup: {e} Not connected; try POST /connect.")
     keepalive_task = asyncio.create_task(keepalive())
-    monitor_task = asyncio.create_task(telemetry.monitor(telemetry_active))
+    monitor_task = asyncio.create_task(
+        telemetry.monitor(telemetry_active, lambda: not manual_active()))
     yield
     # Shutdown: stop any mission (drive_session stops the motors) and disconnect.
     keepalive_task.cancel()
@@ -451,7 +452,7 @@ async def control_command(ws, cmd, msg):
         if not car["homed"]:
             return "The steering isn't homed; POST /recenter first."
         driver = ManualDriver(car["client"], car["char"],
-                              on_safety_stop=log_safety_stop)
+                              on_safety_stop=log_safety_stop, on_stall=log_stall)
         manual.update(driver=driver, ws=ws,
                       task=asyncio.create_task(_run_manual(driver)))
         return None
@@ -483,6 +484,10 @@ async def control_command(ws, cmd, msg):
 
 def log_safety_stop(reason, speed):
     telemetry.status("SAFETY_STOP", f"{reason}; speed {_lvl(speed)} -> 0")
+
+
+def log_stall(pwm, vel):
+    telemetry.status("STALL", stall_detail(pwm, vel))
 
 
 def _lvl(level):

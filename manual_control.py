@@ -12,10 +12,12 @@ methods only change those targets; one loop sends them to the brick 20 times a
 second (a single 0x31 packet carrying drive PWM and steering degrees) and feeds
 the watchdog, so a button press never waits on Bluetooth.
 
-The loop also enforces two safety stops, both of which drop the speed to 0:
+The loop also enforces three safety stops, all of which drop the speed to 0:
     - dead-man: nothing heard from the controlling page for DEADMAN_S seconds
     - front sensor: an obstacle within SENSOR_TRIGGER_MM while going forward
       (reverse still works, so the car can back away)
+    - stall: drive power on but the drive motor not turning (see
+      car_control.StallDetector), e.g. pushing against something
 """
 
 import asyncio
@@ -51,13 +53,16 @@ def steer_frac(level):
 class ManualDriver:
     """Remote-control driving on one BuWizz connection. Call run() as a task
     (holding the server's car lock), change the targets with the command
-    methods, and end it with request_stop(). `on_safety_stop(reason, speed)`,
-    if given, is called when a safety stop drops the speed from `speed` to 0."""
+    methods, and end it with request_stop(). If given, `on_stall(pwm, vel)` is
+    called when the drive stalls, and `on_safety_stop(reason, speed)` when a
+    safety stop drops the speed from `speed` to 0."""
 
-    def __init__(self, client, char, on_safety_stop=None):
+    def __init__(self, client, char, on_safety_stop=None, on_stall=None):
         self.client = client
         self.char = char
         self.on_safety_stop = on_safety_stop
+        self.on_stall = on_stall
+        self._stall = car_control.StallDetector()
         self.speed = 0                 # -SPEED_LEVELS .. +SPEED_LEVELS
         self.steer = 0                 # -STEER_LEVELS .. +STEER_LEVELS
         self.last_heard = time.time()
@@ -135,6 +140,11 @@ class ManualDriver:
             d = car_control.read_distance()
             if d is not None and d <= car_control.SENSOR_TRIGGER_MM:
                 self._safety_stop(f"front sensor {d} mm")
+        pwm, vel = speed_pwm(self.speed), car_control.drive_vel()
+        if self._stall.update(pwm, vel):
+            if self.on_stall is not None:
+                self.on_stall(pwm, vel)
+            self._safety_stop("drive stalled")
 
     def _safety_stop(self, reason):
         print(f"    ! {reason} -> manual stop")

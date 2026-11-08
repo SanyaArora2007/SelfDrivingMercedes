@@ -155,6 +155,8 @@ latest_status = {}
 # The status filter's state: the steering motor's pos-to-abs_pos offset, the
 # drops in a row, and the drops not yet reported (see on_status()).
 status_filter = {"offset": None, "drops": 0, "unreported": 0, "logged": 0.0}
+# The drive PWM most recently sent to the brick, whoever sent it (see send()).
+drive_command = {"pwm": 0}
 disconnect_info = {"reason": None}
 distance_sensor = None    # set in main() when the VL53L0X is present
 last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
@@ -335,12 +337,17 @@ def on_disconnect(_client):
 
 
 async def send(client, char, packet):
-    """Write a packet, converting a lost connection into a clear error."""
+    """Write a packet, converting a lost connection into a clear error. Notes
+    the drive PWM of motor packets, for stall detection."""
     if not client.is_connected:
         raise ConnectionError(
             disconnect_info["reason"] or "BuWizz is no longer connected"
         )
     await client.write_gatt_char(char, packet, response=False)
+    if packet[0] == CMD_SET_MOTOR_EXT:
+        drive_command["pwm"] = struct.unpack_from("<i", packet, 1 + 4 * (DRIVE_PORT - 1))[0]
+    elif packet[0] == CMD_SET_MOTOR:
+        drive_command["pwm"] = struct.unpack_from("b", packet, DRIVE_PORT)[0]
 
 
 async def feed_watchdog(client, char):
@@ -606,6 +613,43 @@ def drive_vel():
     return v[DRIVE_PORT - 1] if len(v) >= DRIVE_PORT else None
 
 
+def drive_current():
+    """Current drawn by the drive motor (A), or None if not reported yet."""
+    c = latest_status.get("currents", [])
+    return c[DRIVE_PORT - 1] if len(c) >= DRIVE_PORT else None
+
+
+class StallDetector:
+    """Spots a drive stall: power commanded but the drive motor not turning
+    (|vel| < STALL_VEL) for STALL_TIME, ignoring the first DRIVE_GRACE seconds
+    after the drive starts or changes direction (spin-up). The same test as
+    drive() makes during a mission."""
+
+    def __init__(self):
+        self.direction = 0
+        self.since = 0.0             # when the drive started in this direction
+        self.stalled_since = None
+        self.reported = False
+
+    def update(self, pwm, vel, now=None):
+        """Feed in the commanded PWM and measured velocity. Returns True once
+        per stall, when it has lasted STALL_TIME."""
+        now = time.monotonic() if now is None else now
+        direction = (pwm > 0) - (pwm < 0)
+        if direction != self.direction:
+            self.direction, self.since = direction, now
+            self.stalled_since, self.reported = None, False
+        if direction == 0 or vel is None or now - self.since < DRIVE_GRACE:
+            return False
+        if abs(vel) >= STALL_VEL:
+            self.stalled_since, self.reported = None, False
+            return False
+        if self.stalled_since is None:
+            self.stalled_since = now
+        if not self.reported and now - self.stalled_since >= STALL_TIME:
+            self.reported = True
+            return True
+        return False
 
 
 def init_sensor():
@@ -828,6 +872,7 @@ async def connect():
     # Clear state left over from a previous connection in this process.
     latest_status.clear()
     status_filter.update(offset=None, drops=0, unreported=0)
+    drive_command["pwm"] = 0
     disconnect_info["reason"] = None
 
     print(f"Scanning for {DEVICE_NAME} ...")
