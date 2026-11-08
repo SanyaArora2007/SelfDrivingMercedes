@@ -85,6 +85,7 @@ CAL_STEP     = 20    # motor-degree increment when probing outward for a stop
 CAL_MAX      = 500   # never probe further than this many degrees from center
 CAL_LAG      = 10    # if the shaft trails the target by more than this -> at a stop
 CAL_BACKOFF  = 60    # back away this far before probing, for a run-up to the stop
+CAL_STOP_STEPS = 3   # steps in a row that barely move before we call it a stop
 STEER_MARGIN = 0.85  # only use this fraction of full lock (don't press the stops)
 
 # The lock-to-lock travel is a fixed property of the build, so we cache the
@@ -329,12 +330,19 @@ async def probe_stop(client, char, start, direction):
     before a stop is stiff, and starting inside it from standstill the shaft
     barely moves on the first step, which would be mistaken for the stop itself
     (e.g. when a run ended with the wheels turned). The run-up carries it
-    through to the real stop."""
+    through to the real stop.
+
+    The run-up can't help when the back-off itself lands against the OTHER stop
+    (wheels already at the far lock), so a stall only counts as the stop after
+    CAL_STOP_STEPS steps in a row: in the stiff zone the target keeps pulling
+    ahead and the shaft breaks free, while at a real stop it never moves. The
+    stop is where the stall began, before the extra steps pressed into it."""
     backed = await servo_to(client, char, start - direction * CAL_BACKOFF,
                             timeout=1.5, tol=CAL_LAG)
     if backed is not None:
         start = backed
     reached = prev = start
+    stalls = 0
     step = 0
     while step < CAL_MAX:
         step += CAL_STEP
@@ -345,10 +353,16 @@ async def probe_stop(client, char, start, direction):
         progress = (actual - prev) * direction     # advance this step (deg)
         print(f"    probe {'+' if direction > 0 else '-'}: target={target} deg  "
               f"actual={actual} deg  (advanced {progress:+d})")
-        reached = actual
-        if progress < CAL_STEP * 0.4:              # barely moved -> at a stop
-            break
         prev = actual
+        if progress < CAL_STEP * 0.4:              # barely moved: stop or stiff zone
+            if stalls == 0:
+                reached = actual
+            stalls += 1
+            if stalls >= CAL_STOP_STEPS:
+                break
+        else:
+            stalls = 0
+            reached = actual
     return reached
 
 
@@ -385,7 +399,12 @@ async def quick_home(client, char, half):
     """Re-home using a cached half-lock span: probe just ONE end stop, then
     derive center = right_stop - half. Faster than a full two-stop calibration
     and still self-correcting for the per-session encoder zero. Leaves the steer
-    port as a position servo holding center. Returns True on success."""
+    port as a position servo holding center. Returns True on success; on
+    failure steer_cal is left as it was.
+
+    The result is checked by driving to the new center: a center the shaft
+    can't reach (e.g. past the left stop, from a false right stop) means the
+    probe was fooled, and the caller falls back to a full calibration."""
     print("Re-homing steering to one stop...")
     await send(client, char, pu_func_packet({STEER_PORT: PU_POS_SERVO}))
     await asyncio.sleep(0.3)
@@ -394,11 +413,15 @@ async def quick_home(client, char, half):
         print("  [!] No steering position feedback for re-home.")
         return False
     right = await probe_stop(client, char, start, +1)
-    steer_cal["half"] = half
-    steer_cal["center"] = right - half
+    center = right - half
     print(f"  right stop={right} deg, half-lock={half:.0f} deg  ->  "
-          f"center={steer_cal['center']:.0f} deg (motor)")
-    await servo_to(client, char, steer_cal["center"], timeout=3.0)
+          f"center={center:.0f} deg (motor)")
+    actual = await servo_to(client, char, center, timeout=3.0)
+    if actual is None or abs(actual - center) > CAL_LAG:
+        print(f"  [!] Couldn't reach that center (stuck at {actual} deg); "
+              f"the right stop was probably misread.")
+        return False
+    steer_cal.update(center=center, half=half)
     return True
 
 

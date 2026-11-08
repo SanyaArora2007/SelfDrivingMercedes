@@ -146,11 +146,15 @@ class ManualDriver:
     async def recenter(self):
         """Re-find the steering center (as POST /recenter does) without ending
         manual control. Drive and steering targets go back to zero. Returns
-        True if homing succeeded; raises ConnectionError if the link is lost."""
+        True if homing succeeded; raises ConnectionError if the link is lost.
+
+        The wheels are straightened first (as a mission does when it ends):
+        re-homing from full lock starts the probe against a stop."""
         async with self._link:
             self.set_speed(0)
             self.set_steer(0)
             await send(self.client, self.char, motor_packet({}))   # all stop
+            await car_control.servo_to(self.client, self.char, steer_target(0.0))
             return await car_control.home_steering(self.client, self.char)
 
     def state(self):
