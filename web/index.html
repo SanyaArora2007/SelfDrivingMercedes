@@ -206,6 +206,7 @@
     </dl></div>
     <div class="panel"><h2>Steering motor</h2><dl>
       <dt>Angle</dt><dd id="t-angle">—</dd>
+      <dt>Absolute</dt><dd id="t-abs">—</dd>
       <dt>Current</dt><dd id="t-steer-a">—</dd>
     </dl></div>
     <div class="panel"><h2>Battery</h2><dl>
@@ -384,6 +385,8 @@
     $("t-power").textContent = fmt(d.power_w, "W", 1);
     $("t-angle").textContent = st.pos_deg === null || st.pos_deg === undefined ? "—" : `${st.pos_deg}° motor`;
     $("t-steer-a").textContent = fmt(st.current_a, "A");
+    $("t-abs").textContent = st.abs_deg === null || st.abs_deg === undefined ? "—"
+      : `${st.abs_deg}° (type ${st.type})`;
     $("t-vbat").textContent = fmt(b.vbat, "V");
     $("t-temp").textContent = fmt(b.temp_c, "°C", 0);
     $("t-err").textContent = b.error === null || b.error === undefined ? "—" : (b.error ? "YES" : "no");

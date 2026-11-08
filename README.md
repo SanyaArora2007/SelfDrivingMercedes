@@ -151,6 +151,16 @@ is straight. The calibration works by:
 - Using the two end stops, it records the **center** (midpoint between the two) and the
   **half-lock span** (how far full lock is from center, in motor degrees, which is about
   +/-137 degrees on this car).
+
+The steering motor also reports an **absolute angle** (-180 to 179 degrees) that does *not*
+reset at power-up. Because the whole steering range is less than one full turn of the
+motor, each absolute angle matches exactly one steering position. So the calibration also
+saves the center's absolute angle in `steer_cal.json`, and after that the car finds
+straight-ahead just by reading the motor, without driving the wheels into the end stops.
+The full calibration only runs again when there's no saved center, when the reading
+doesn't make sense, or when you ask for it (`POST /recenter`, the page's **Recenter
+steering** button, or `DriveCar.py --recalibrate`).
+
 ---
 
 ## Distance sensor

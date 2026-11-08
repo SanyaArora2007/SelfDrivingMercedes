@@ -29,7 +29,7 @@ Endpoints:
     GET  /state                     the car's current state and telemetry
     POST /run                       start a mission with the default duration
     POST /run  {"duration": 60}     same as `DriveCar.py --duration 60`
-    POST /recenter                  re-find the steering center now
+    POST /recenter                  re-calibrate the steering (both end stops)
     POST /connect                   connect to the BuWizz and home the steering
     POST /disconnect                close the BuWizz connection
 
@@ -301,8 +301,8 @@ class RunRequest(BaseModel):
 
 
 def steering():
-    return {"center": car_control.steer_cal["center"],
-            "half": car_control.steer_cal["half"]}
+    cal = car_control.steer_cal
+    return {k: cal[k] for k in ("center", "half", "lock_left", "lock_right")}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -440,7 +440,7 @@ async def recenter():
             check_ready()
             async with car_lock:
                 car["homed"] = await car_control.home_steering(car["client"],
-                                                               car["char"])
+                                                               car["char"], full=True)
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     if not car["homed"]:

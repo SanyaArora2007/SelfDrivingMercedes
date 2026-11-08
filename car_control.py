@@ -4,8 +4,8 @@
 car_control.py  -  Self-Driving Mercedes: shared car-control library
 
 Controls a LEGO car powered by a BuWizz 3.0 Pro (XL drive motor + L steering
-motor) over Bluetooth LE. On start it calibrates the steering to its end stops,
-then cruises forward and avoids obstacles on its own: a front VL53L0X distance
+motor) over Bluetooth LE. On start it finds the steering center (from the
+steering motor's absolute angle, or by probing its end stops), then cruises forward and avoids obstacles on its own: a front VL53L0X distance
 sensor reacts before contact, and a velocity-stall check catches anything the
 beam misses. On an obstacle it backs up, turns a random direction, and drives
 around, then keeps cruising for the mission duration.
@@ -69,6 +69,7 @@ PU_POS_SERVO  = 0x15  # position servo: reference is degrees (cumulative from ze
 # ---- Your build --------------------------------------------------------------
 DRIVE_PORT = 1    # PU port the XL drive motor is plugged into (1-4)
 STEER_PORT = 2    # PU port the L steering motor is plugged into (1-4)
+STEER_MOTOR_TYPE = 46  # Technic Large motor: reports an absolute shaft angle
 
 MAX_DRIVE   = 45  # crawl cap out of 127 (mirrors your power-curve ceiling)
 STEER_TIMEOUT = 2.0  # max seconds to wait for the steering servo to converge
@@ -86,11 +87,19 @@ CAL_MAX      = 500   # never probe further than this many degrees from center
 CAL_LAG      = 10    # if the shaft trails the target by more than this -> at a stop
 CAL_BACKOFF  = 60    # back away this far before probing, for a run-up to the stop
 CAL_STOP_STEPS = 3   # steps in a row that barely move before we call it a stop
-STEER_MARGIN = 0.85  # only use this fraction of full lock (don't press the stops)
+CAL_ABS_SLACK = 20   # how far past full lock an absolute reading may still be
+STEER_MARGIN = 0.85  # with straight ahead at the midpoint, use this fraction of
+                     # the half-lock (the rest is clearance from the stops)
 
 # The lock-to-lock travel is a fixed property of the build, so we cache the
-# half-lock span. The encoder's zero is per-session, though, so `center` is NOT
-# cached -- each start re-homes to one stop to re-derive it (see quick_home()).
+# half-lock span. The cumulative position's zero is wherever the motor was at
+# brick power-up, so angles in those degrees can't be cached -- but the motor's
+# ABSOLUTE angle (abs_pos, -180..179) keeps its meaning across power cycles, so
+# we cache the stops' midpoint (`mid_abs`) and straight ahead (`center_abs`) as
+# absolute angles and re-derive both on each connect, with no probing (see
+# abs_home()). Straight ahead isn't necessarily the midpoint: on this car the
+# left side has more travel. Their difference is the steering trim, which a
+# full calibration keeps; set it by editing center_abs in the cache.
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "steer_cal.json")
 
@@ -134,26 +143,43 @@ latest_status = {}
 disconnect_info = {"reason": None}
 distance_sensor = None    # set in main() when the VL53L0X is present
 last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
-# Filled in by calibrate_steering()/quick_home(): motor-degree center and half.
-steer_cal = {"center": 0.0, "half": 0.0}
+# Filled in by calibrate_steering()/abs_home() (see set_steering()): straight
+# ahead and the half-lock in motor degrees, each side's usable lock from
+# straight ahead, and the cached absolute angles.
+steer_cal = {"center": 0.0, "half": 0.0, "lock_left": 0.0, "lock_right": 0.0,
+             "center_abs": None, "mid_abs": None}
 
 
 def load_cache():
-    """Return the cached steering half-lock span (float) or None if unavailable
-    or unusable."""
+    """Return the cached steering calibration as {"half": float, "center_abs":
+    int or None, "mid_abs": int or None, "trim": int}, or None if unavailable
+    or unusable. `trim` is how far straight ahead is from the stops' midpoint
+    (0 if unknown); a cache without mid_abs is taken to have no trim."""
     try:
         with open(CACHE_FILE) as f:
-            half = float(json.load(f)["half"])
-        return half if half >= CAL_STEP else None
+            data = json.load(f)
+        half = float(data["half"])
+        center_abs = data.get("center_abs")
+        center_abs = None if center_abs is None else int(center_abs)
+        mid_abs = data.get("mid_abs", center_abs)
+        mid_abs = None if mid_abs is None else int(mid_abs)
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if half < CAL_STEP:
+        return None
+    trim = 0 if None in (center_abs, mid_abs) else wrap180(center_abs - mid_abs)
+    return {"half": half, "center_abs": center_abs, "mid_abs": mid_abs,
+            "trim": trim}
 
 
-def save_cache(half):
-    """Persist the steering half-lock span next to the script."""
+def save_cache():
+    """Persist the half-lock span and the absolute angles of straight ahead and
+    the stops' midpoint (from steer_cal) next to the script."""
     try:
         with open(CACHE_FILE, "w") as f:
-            json.dump({"half": round(half, 1)}, f)
+            json.dump({"half": round(steer_cal["half"], 1),
+                       "mid_abs": steer_cal["mid_abs"],
+                       "center_abs": steer_cal["center_abs"]}, f)
         print(f"  saved steering calibration to {CACHE_FILE}")
     except OSError as e:
         print(f"  [!] could not save calibration: {e}")
@@ -287,10 +313,28 @@ async def hold(client, char, values, seconds, hz=20):
         await asyncio.sleep(1 / hz)
 
 
+def steer_field(key):
+    """The steering port's latest value of a per-port status field ("pos",
+    "abs_pos", "type", ...), or None if not reported yet."""
+    v = latest_status.get(key, [])
+    return v[STEER_PORT - 1] if len(v) >= STEER_PORT else None
+
+
 def steer_pos():
     """Current steering motor position in degrees, or None if not reported yet."""
-    pos = latest_status.get("pos", [])
-    return pos[STEER_PORT - 1] if len(pos) >= STEER_PORT else None
+    return steer_field("pos")
+
+
+def wrap180(deg):
+    """An angle or angle difference folded into -180..179."""
+    return (deg + 180) % 360 - 180
+
+
+def log_steer_angles(label):
+    """Print the steering motor's type, cumulative position and absolute
+    (-180..179) angle."""
+    print(f"  steering {label}: type={steer_field('type')}  pos={steer_pos()} deg  "
+          f"abs_pos={steer_field('abs_pos')} deg")
 
 
 async def servo_to(client, char, target_deg, timeout=STEER_TIMEOUT, tol=STEER_TOL,
@@ -366,10 +410,24 @@ async def probe_stop(client, char, start, direction):
     return reached
 
 
-async def calibrate_steering(client, char):
-    """Find both steering end stops by servo probing and record center +
-    half-travel (motor deg). Leaves the steer port as a position servo at
-    center. Stays in servo mode throughout."""
+def set_steering(center, mid, half):
+    """Record the steering geometry in this session's motor degrees: `center`
+    is straight ahead and `mid` the midpoint between the end stops. Each side's
+    usable lock runs from straight ahead to that side's stop, short by the same
+    clearance STEER_MARGIN leaves when straight ahead is the midpoint -- so a
+    trimmed center never steers into a stop."""
+    clearance = (1 - STEER_MARGIN) * half
+    steer_cal.update(center=center, half=half,
+                     lock_right=max(0.0, mid + half - center - clearance),
+                     lock_left=max(0.0, center - (mid - half) - clearance))
+
+
+async def calibrate_steering(client, char, trim=0):
+    """Find both steering end stops by servo probing and record the half-lock
+    span and straight ahead -- `trim` degrees from the stops' midpoint (the
+    cached trim, so recalibrating keeps it) -- plus their absolute angles for
+    abs_home(). Leaves the steer port as a position servo at straight ahead.
+    Stays in servo mode throughout."""
     print("Calibrating steering travel...")
     await send(client, char, pu_func_packet({STEER_PORT: PU_POS_SERVO}))
     await asyncio.sleep(0.3)
@@ -384,44 +442,62 @@ async def calibrate_steering(client, char):
     await servo_to(client, char, start, timeout=3.0, tol=CAL_LAG)  # back to start
     left = await probe_stop(client, char, start, -1)
 
-    steer_cal["center"] = (left + right) / 2.0
-    steer_cal["half"] = abs(right - left) / 2.0
-    print(f"  left={left} deg  right={right} deg  ->  center={steer_cal['center']:.0f} "
-          f"deg, half-lock={steer_cal['half']:.0f} deg (motor)")
-    await servo_to(client, char, steer_cal["center"], timeout=3.0)
-    if steer_cal["half"] < CAL_STEP:
+    mid = (left + right) / 2.0
+    half = abs(right - left) / 2.0
+    center = mid + trim
+    print(f"  left={left} deg  right={right} deg  ->  midpoint={mid:.0f} deg, "
+          f"half-lock={half:.0f} deg, straight ahead={center:.0f} deg "
+          f"(trim {trim:+d}) (motor)")
+    set_steering(center, mid, half)
+    await servo_to(client, char, center, timeout=3.0)
+    if half < CAL_STEP:
         print("  [!] Steering travel looks tiny -- calibration may be off.")
         return False
+    # The midpoint's absolute angle: where the shaft is now, corrected by how
+    # far it is from the midpoint.
+    pos, abs_deg = steer_pos(), steer_field("abs_pos")
+    if (pos is not None and abs_deg is not None
+            and steer_field("type") == STEER_MOTOR_TYPE):
+        mid_abs = wrap180(abs_deg + round(mid - pos))
+        steer_cal.update(mid_abs=mid_abs, center_abs=wrap180(mid_abs + trim))
+        print(f"  abs_pos: midpoint={mid_abs} deg, "
+              f"straight ahead={steer_cal['center_abs']} deg")
+    else:
+        steer_cal.update(mid_abs=None, center_abs=None)
     return True
 
 
-async def quick_home(client, char, half):
-    """Re-home using a cached half-lock span: probe just ONE end stop, then
-    derive center = right_stop - half. Faster than a full two-stop calibration
-    and still self-correcting for the per-session encoder zero. Leaves the steer
-    port as a position servo holding center. Returns True on success; on
-    failure steer_cal is left as it was.
-
-    The result is checked by driving to the new center: a center the shaft
-    can't reach (e.g. past the left stop, from a false right stop) means the
-    probe was fooled, and the caller falls back to a full calibration."""
-    print("Re-homing steering to one stop...")
+async def abs_home(client, char, half, center_abs, mid_abs):
+    """Find straight ahead without probing, from the steering motor's absolute
+    angle: it is where abs_pos equals the cached `center_abs` (and the stops'
+    midpoint where it equals `mid_abs`). Lock to lock is under a full turn, so
+    the shaft's offset from either -- folded into -180..179 -- is unambiguous,
+    and each in this session's cumulative degrees is pos minus that offset.
+    Leaves the steer port as a position servo holding straight ahead. Returns
+    True on success; on failure (no absolute angle, a reading past the stops,
+    or a center the shaft can't reach) steer_cal is left as it was."""
+    print("Homing steering from its absolute angle...")
     await send(client, char, pu_func_packet({STEER_PORT: PU_POS_SERVO}))
     await asyncio.sleep(0.3)
-    start = steer_pos()
-    if start is None:
-        print("  [!] No steering position feedback for re-home.")
+    pos, abs_deg, mtype = steer_pos(), steer_field("abs_pos"), steer_field("type")
+    if pos is None or abs_deg is None or mtype != STEER_MOTOR_TYPE:
+        print(f"  [!] No usable absolute angle (type={mtype}, abs_pos={abs_deg}).")
         return False
-    right = await probe_stop(client, char, start, +1)
-    center = right - half
-    print(f"  right stop={right} deg, half-lock={half:.0f} deg  ->  "
-          f"center={center:.0f} deg (motor)")
+    from_mid = wrap180(abs_deg - mid_abs)
+    if abs(from_mid) > half + CAL_ABS_SLACK:
+        print(f"  [!] abs_pos={abs_deg} deg is {from_mid:+d} deg from the cached "
+              f"midpoint ({mid_abs} deg), past the stops -- cache looks stale.")
+        return False
+    center = pos - wrap180(abs_deg - center_abs)
+    mid = pos - from_mid
+    print(f"  abs_pos={abs_deg} deg, cached straight ahead abs_pos={center_abs} "
+          f"deg  ->  center={center} deg (motor)")
     actual = await servo_to(client, char, center, timeout=3.0)
     if actual is None or abs(actual - center) > CAL_LAG:
-        print(f"  [!] Couldn't reach that center (stuck at {actual} deg); "
-              f"the right stop was probably misread.")
+        print(f"  [!] Couldn't reach that center (stuck at {actual} deg).")
         return False
-    steer_cal.update(center=center, half=half)
+    set_steering(center, mid, half)
+    steer_cal.update(center_abs=center_abs, mid_abs=mid_abs)
     return True
 
 
@@ -429,7 +505,7 @@ async def steer_to_fraction(client, char, frac):
     """Steer to a fraction of full lock: -1.0 = full left, +1.0 = full right,
     0.0 = center. A safety margin keeps it off the hard stops."""
     frac = max(-1.0, min(1.0, frac))
-    target = steer_cal["center"] + frac * steer_cal["half"] * STEER_MARGIN
+    target = steer_target(frac)
     actual = await servo_to(client, char, target)
     shown = actual if actual is not None else "?"
     print(f"    steer {frac:+.0%} lock  ->  target={target:.0f} deg  "
@@ -438,9 +514,11 @@ async def steer_to_fraction(client, char, frac):
 
 # ---- Obstacle-avoidance behavior --------------------------------------------
 def steer_target(frac):
-    """Motor-degree servo target for a steering fraction (-1 left .. +1 right)."""
+    """Motor-degree servo target for a steering fraction (-1 left .. +1 right)
+    of that side's usable lock."""
     frac = max(-1.0, min(1.0, frac))
-    return steer_cal["center"] + frac * steer_cal["half"] * STEER_MARGIN
+    lock = steer_cal["lock_right"] if frac >= 0 else steer_cal["lock_left"]
+    return steer_cal["center"] + frac * lock
 
 
 def drive_vel():
@@ -706,21 +784,29 @@ async def disconnect(client):
     await client.disconnect()
 
 
-async def home_steering(client, char):
-    """Find the steering center for this connection's encoder zero. Reuses the
-    cached half-lock span with a quick one-stop re-home, falling back to a full
-    calibration if there's no cache (or re-home fails). Returns True if the
-    steering is centered; on failure steer_cal is left as it was."""
+async def home_steering(client, char, full=False):
+    """Find the steering center for this connection's encoder zero. Normally
+    that comes from the motor's absolute angle and the cached center (no wheel
+    movement beyond straightening). A full two-stop calibration runs instead,
+    re-learning and caching the center, when `full` is set, when nothing is
+    cached yet, or when the absolute angle can't be used. Returns True if the
+    steering is centered."""
+    log_steer_angles("before homing")
     cached = load_cache()
-    if cached is not None:
-        print(f"Using cached steering span (half-lock={cached:.0f} deg motor).")
-        if await quick_home(client, char, cached):
+    if full:
+        print("Full steering calibration requested...")
+    elif cached is not None and cached["center_abs"] is not None:
+        if await abs_home(client, char, cached["half"], cached["center_abs"],
+                          cached["mid_abs"]):
+            log_steer_angles("at center")
             return True
-        print("  Re-home failed; running full calibration...")
+        print("  Falling back to a full calibration...")
     else:
-        print("No cached steering calibration; running full calibration...")
-    if await calibrate_steering(client, char):
-        save_cache(steer_cal["half"])
+        print("No cached steering center; running full calibration...")
+    trim = cached["trim"] if cached is not None else 0
+    if await calibrate_steering(client, char, trim):
+        save_cache()
+        log_steer_angles("at center")
         return True
     return False
 
@@ -777,8 +863,10 @@ async def main(recalibrate=False, selftest=False, duration=MISSION_TIME,
 
         # --recalibrate: do a full two-stop calibration, cache it, and stop.
         if recalibrate:
-            if await calibrate_steering(client, app):
-                save_cache(steer_cal["half"])
+            cached = load_cache()
+            if await calibrate_steering(client, app,
+                                        cached["trim"] if cached else 0):
+                save_cache()
                 print("\nRecalibration complete.")
             else:
                 print("\nRecalibration failed; cache left unchanged.")

@@ -22,7 +22,7 @@ import asyncio
 import time
 
 import car_control
-from car_control import (DRIVE_PORT, STEER_PORT, STEER_MARGIN, WATCHDOG_FEED,
+from car_control import (DRIVE_PORT, STEER_PORT, WATCHDOG_FEED,
                          feed_watchdog, motor_ext_packet, motor_packet, send,
                          steer_target)
 
@@ -144,7 +144,7 @@ class ManualDriver:
                 self.set_speed(0)
 
     async def recenter(self):
-        """Re-find the steering center (as POST /recenter does) without ending
+        """Re-calibrate the steering (as POST /recenter does) without ending
         manual control. Drive and steering targets go back to zero. Returns
         True if homing succeeded; raises ConnectionError if the link is lost.
 
@@ -155,7 +155,8 @@ class ManualDriver:
             self.set_steer(0)
             await send(self.client, self.char, motor_packet({}))   # all stop
             await car_control.servo_to(self.client, self.char, steer_target(0.0))
-            return await car_control.home_steering(self.client, self.char)
+            return await car_control.home_steering(self.client, self.char,
+                                                   full=True)
 
     def state(self):
         return {"speed_level": self.speed, "speed_pwm": speed_pwm(self.speed),
@@ -175,7 +176,7 @@ def telemetry(connected):
     steer_a = _port(s.get("currents", []), STEER_PORT)
     pos = _port(s.get("pos", []), STEER_PORT)
     cal = car_control.steer_cal
-    lock = cal["half"] * STEER_MARGIN
+    lock = None if pos is None else cal["lock_right"] if pos >= cal["center"] else cal["lock_left"]
     mm = car_control.recent_distance()
     return {
         "drive": {
@@ -185,6 +186,8 @@ def telemetry(connected):
         },
         "steer": {
             "pos_deg": pos,
+            "abs_deg": _port(s.get("abs_pos", []), STEER_PORT),   # -180..179, absolute
+            "type": _port(s.get("type", []), STEER_PORT),         # motor type ID
             # Actual angle as a fraction of the usable lock (-1 left .. +1 right).
             "actual_frac": round((pos - cal["center"]) / lock, 2) if pos is not None and lock else None,
             "current_a": steer_a,
