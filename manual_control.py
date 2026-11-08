@@ -51,14 +51,17 @@ def steer_frac(level):
 class ManualDriver:
     """Remote-control driving on one BuWizz connection. Call run() as a task
     (holding the server's car lock), change the targets with the command
-    methods, and end it with request_stop()."""
+    methods, and end it with request_stop(). `on_safety_stop(reason, speed)`,
+    if given, is called when a safety stop drops the speed from `speed` to 0."""
 
-    def __init__(self, client, char):
+    def __init__(self, client, char, on_safety_stop=None):
         self.client = client
         self.char = char
+        self.on_safety_stop = on_safety_stop
         self.speed = 0                 # -SPEED_LEVELS .. +SPEED_LEVELS
         self.steer = 0                 # -STEER_LEVELS .. +STEER_LEVELS
         self.last_heard = time.time()
+        self.homing = False            # True while recenter() probes the stops
         self._stop = asyncio.Event()
         # Held for each send, and for the whole of a re-home, so the two
         # never interleave packets.
@@ -84,27 +87,20 @@ class ManualDriver:
     def all_stop(self):
         self.set_speed(0)
 
+    def straighten(self):
+        self.set_steer(0)
+
     def request_stop(self):
         """End run(): it stops the motors and straightens the wheels."""
         self._stop.set()
 
     def set_speed(self, level):
         """Jump straight to a speed level (clamped to the range)."""
-        level = max(-SPEED_LEVELS, min(SPEED_LEVELS, level))
-        if level != self.speed:
-            self.speed = level
-            way = "forward" if level > 0 else "reverse" if level < 0 else "stopped"
-            print(f"  manual: speed {level:{'+' if level else ''}d}/{SPEED_LEVELS} "
-                  f"{way} (pwm={speed_pwm(level):+d})")
+        self.speed = max(-SPEED_LEVELS, min(SPEED_LEVELS, level))
 
     def set_steer(self, level):
         """Jump straight to a steering level (clamped to the range)."""
-        level = max(-STEER_LEVELS, min(STEER_LEVELS, level))
-        if level != self.steer:
-            self.steer = level
-            way = "right" if level > 0 else "left" if level < 0 else "straight"
-            print(f"  manual: steer {level:{'+' if level else ''}d}/{STEER_LEVELS} "
-                  f"{way} ({steer_frac(level):+.0%} lock)")
+        self.steer = max(-STEER_LEVELS, min(STEER_LEVELS, level))
 
     # ---- the send loop ------------------------------------------------------
     async def run(self):
@@ -134,14 +130,18 @@ class ManualDriver:
 
     def _safety_stops(self):
         if self.speed != 0 and time.time() - self.last_heard > DEADMAN_S:
-            print(f"    ! no word from the controller for {DEADMAN_S:.0f} s "
-                  f"-> manual stop")
-            self.set_speed(0)
+            self._safety_stop(f"no word from the page for {DEADMAN_S:.0f} s")
         if self.speed > 0:
             d = car_control.read_distance()
             if d is not None and d <= car_control.SENSOR_TRIGGER_MM:
-                print(f"    ! sensor {d} mm -> manual stop")
-                self.set_speed(0)
+                self._safety_stop(f"front sensor {d} mm")
+
+    def _safety_stop(self, reason):
+        print(f"    ! {reason} -> manual stop")
+        speed = self.speed
+        self.set_speed(0)
+        if self.on_safety_stop is not None:
+            self.on_safety_stop(reason, speed)
 
     async def recenter(self):
         """Re-calibrate the steering (as POST /recenter does) without ending
@@ -155,8 +155,12 @@ class ManualDriver:
             self.set_steer(0)
             await send(self.client, self.char, motor_packet({}))   # all stop
             await car_control.servo_to(self.client, self.char, steer_target(0.0))
-            return await car_control.home_steering(self.client, self.char,
-                                                   full=True)
+            self.homing = True
+            try:
+                return await car_control.home_steering(self.client, self.char,
+                                                       full=True)
+            finally:
+                self.homing = False
 
     def state(self):
         return {"speed_level": self.speed, "speed_pwm": speed_pwm(self.speed),

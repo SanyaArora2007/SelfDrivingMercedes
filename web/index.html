@@ -16,6 +16,7 @@
     --log-bg: #11151c;
     --log-text: #d6dbe4;
     --log-dim: #7d8696;
+    --log-control: #8ab4ff;
     --warn: #f0b429;
     --error: #ff6b6b;
     --ok: #2f9e44;
@@ -146,8 +147,12 @@
   #msg.error { color: var(--off); }
   .hint { font-size: 12px; color: var(--muted); }
   .logbar { display: flex; align-items: center; gap: 12px; }
-  .logbar h2 { flex: 1; margin: 0; }
-  #log {
+  .logbar .seg { flex: 1; display: flex; }
+  .seg button { border-radius: 0; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .logview {
     height: 45vh;
     min-height: 200px;
     overflow-y: auto;
@@ -161,9 +166,11 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
-  #log .dim   { color: var(--log-dim); }
-  #log .warn  { color: var(--warn); }
-  #log .error { color: var(--error); }
+  .logview[hidden] { display: none; }
+  .logview .dim     { color: var(--log-dim); }
+  .logview .warn    { color: var(--warn); }
+  .logview .error   { color: var(--error); }
+  .logview .control { color: var(--log-control); }
   @media (max-width: 760px) {
     .control { grid-template-columns: 1fr; justify-items: center; }
     .side { width: 100%; }
@@ -182,18 +189,18 @@
 
   <section class="panel control">
     <div class="pad">
-      <!-- Diagonals send both commands, e.g. one step faster and one step left. -->
-      <button class="up-left diag" data-cmd="speed_up turn_left" type="button" title="Forward + Left" disabled>↖</button>
-      <button class="up-right diag" data-cmd="speed_up turn_right" type="button" title="Forward + Right" disabled>↗</button>
-      <button class="down-left diag" data-cmd="slow_down turn_left" type="button" title="Reverse + Left" disabled>↙</button>
-      <button class="down-right diag" data-cmd="slow_down turn_right" type="button" title="Reverse + Right" disabled>↘</button>
+      <!-- Each button sends its own command, so telemetry can tell them apart;
+           a diagonal steps both the speed and the steering. -->
+      <button class="up-left diag" data-cmd="forward_left" type="button" title="Forward + Left" disabled>↖</button>
+      <button class="up-right diag" data-cmd="forward_right" type="button" title="Forward + Right" disabled>↗</button>
+      <button class="down-left diag" data-cmd="reverse_left" type="button" title="Reverse + Left" disabled>↙</button>
+      <button class="down-right diag" data-cmd="reverse_right" type="button" title="Reverse + Right" disabled>↘</button>
       <button class="up" data-cmd="speed_up" type="button" disabled>▲ Forward</button>
       <button class="left" data-cmd="turn_left" type="button" disabled>◀ Left</button>
       <button class="stop" data-cmd="all_stop" type="button" disabled>STOP</button>
       <button class="right" data-cmd="turn_right" type="button" disabled>Right ▶</button>
       <button class="down" data-cmd="slow_down" type="button" disabled>▼ Reverse</button>
-      <!-- Same as clicking the middle of the steering bar. -->
-      <button class="straight" data-cmd="set_steer" data-level="0" type="button" disabled>STRAIGHT</button>
+      <button class="straight" data-cmd="straight" type="button" disabled>STRAIGHT</button>
     </div>
     <div class="side">
       <div class="row">
@@ -241,37 +248,65 @@
   </section>
 
   <div class="logbar">
-    <h2>Log</h2>
+    <div class="seg" role="tablist">
+      <button id="show-log" type="button" role="tab" data-view="log">Server log</button>
+      <button id="show-telemetry" type="button" role="tab" data-view="telemetry">Telemetry</button>
+    </div>
     <button id="clear" type="button">Clear</button>
   </div>
-  <pre id="log" aria-live="polite"></pre>
+  <pre id="log" class="logview" aria-live="polite"></pre>
+  <pre id="telemetry" class="logview" aria-live="polite" hidden></pre>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
 
-  // ---- live log (/ws/logs) ------------------------------------------------
-  const MAX_LINES = 3000;  // keep the page responsive on long sessions
-  const log = $("log");
-  $("clear").onclick = () => { log.textContent = ""; };
+  // ---- live logs (/ws/logs and /ws/telemetry), one shown at a time --------
+  const MAX_LINES = 3000;  // per view; keeps the page responsive on long sessions
 
-  function classify(line) {
+  function classifyLog(line) {
     if (/Traceback|Error|failed|Aborting|aborted/i.test(line)) return "error";
     if (/\[!\]|\s! /.test(line)) return "warn";
     if (/INFO:|pwm=|vbat=|probe [+-]:/.test(line)) return "dim";
     return "";
   }
 
-  function append(line) {
-    // Only follow the bottom if the viewer hasn't scrolled up to read.
-    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  function classifyTelemetry(line) {
+    return /^\S+ \S+ {2}CONTROL /.test(line) ? "control" : "";
+  }
+
+  function append(view, line, classify) {
+    // Only follow the bottom if the viewer hasn't scrolled up to read. (A
+    // hidden view has no height, so it counts as at the bottom.)
+    const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
     const div = document.createElement("div");
     div.textContent = line;
     const cls = classify(line);
     if (cls) div.className = cls;
-    log.appendChild(div);
-    while (log.childElementCount > MAX_LINES) log.firstElementChild.remove();
-    if (atBottom) log.scrollTop = log.scrollHeight;
+    view.appendChild(div);
+    while (view.childElementCount > MAX_LINES) view.firstElementChild.remove();
+    if (atBottom) view.scrollTop = view.scrollHeight;
   }
+
+  function showView(name) {
+    for (const b of document.querySelectorAll(".seg button")) {
+      const on = b.dataset.view === name;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on);
+      $(b.dataset.view).hidden = !on;
+    }
+    $(name).scrollTop = $(name).scrollHeight;
+    try { localStorage.setItem("logView", name); } catch (e) {}
+  }
+  let savedView = null;
+  try { savedView = localStorage.getItem("logView"); } catch (e) {}
+  showView(savedView === "telemetry" ? "telemetry" : "log");
+  document.querySelectorAll(".seg button").forEach((b) => {
+    b.onclick = () => showView(b.dataset.view);
+  });
+  $("clear").onclick = () => {
+    const visible = document.querySelector(".logview:not([hidden])");
+    visible.textContent = "";
+  };
 
   // Open a WebSocket and reopen it with backoff whenever it closes.
   function keepOpen(path, handlers) {
@@ -290,9 +325,15 @@
     open();
   }
 
+  // On (re)connect the server replays recent history, so start each view afresh.
   keepOpen("/ws/logs", {
-    open: () => { log.textContent = ""; },  // the server replays recent history
-    message: append,
+    open: () => { $("log").textContent = ""; },
+    message: (line) => append($("log"), line, classifyLog),
+    close: () => {},
+  });
+  keepOpen("/ws/telemetry", {
+    open: () => { $("telemetry").textContent = ""; },
+    message: (line) => append($("telemetry"), line, classifyTelemetry),
     close: () => {},
   });
 
@@ -422,13 +463,7 @@
   render();
 
   document.querySelectorAll(".pad button").forEach((b) => {
-    b.onclick = () => {
-      if (b.dataset.level !== undefined) {
-        send(b.dataset.cmd, { level: Number(b.dataset.level) });
-      } else {
-        b.dataset.cmd.split(" ").forEach((cmd) => send(cmd));
-      }
-    };
+    b.onclick = () => send(b.dataset.cmd);
   });
   // Click a segment to jump straight to that level (the middle one is stop /
   // straight ahead).

@@ -3,5 +3,8 @@ __pycache__/
 *.py[cod]
 venv/
 
+# Logs written on the Pi (server.log by restart.sh, telemetry.log by the server)
+*.log
+
 # Local Claude Code settings
 .claude/

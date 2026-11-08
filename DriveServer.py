@@ -23,8 +23,9 @@ Setup / run:
     python3 DriveServer.py --port 8080
 
 Endpoints:
-    GET  /                          web page showing the live server log
+    GET  /                          web page: control pad, telemetry and the logs
     WS   /ws/logs                   live server log, one text message per line
+    WS   /ws/telemetry              live telemetry log (see telemetry.py), likewise
     WS   /ws/control                manual driving (JSON commands) + live car state
     GET  /state                     the car's current state and telemetry
     POST /run                       start a mission with the default duration
@@ -43,7 +44,10 @@ for their work to finish. Every endpoint replies 409 while the car is busy
     engage, release              take / hand back manual control
     speed_up, slow_down          one speed level (-6 reverse .. 0 .. +6 forward)
     turn_right, turn_left        one steering level (-2 left .. 0 .. +2 right)
+    forward_left, forward_right,
+    reverse_left, reverse_right  one speed and one steering level together
     all_stop                     speed to 0
+    straight                     steering to 0
     set_speed + "level": n       jump straight to speed level n
     set_steer + "level": n       jump straight to steering level n
     ping                         heartbeat; manual driving stops without one
@@ -55,6 +59,10 @@ a few seconds after the last command and drops the BLE connection. Only the
 watchdog is fed -- no motor commands -- so the car still stops if this process
 dies. Console output is timestamped, and also streamed to the web page; this
 needs the server started as `python3 DriveServer.py` (not via the uvicorn CLI).
+
+Every driving command is also a CONTROL event in telemetry.log, named after the
+page's button (or bar) it comes from; a monitor adds STATUS events for what the
+car actually does (see telemetry.py).
 """
 
 import argparse
@@ -76,6 +84,7 @@ import car_control
 import manual_control
 from car_control import MISSION_TIME
 from manual_control import ManualDriver
+from telemetry import Telemetry
 
 # The one BuWizz connection, and whether the steering has been homed on it.
 car = {"client": None, "char": None, "homed": False}
@@ -89,10 +98,23 @@ mission_task: Optional[asyncio.Task] = None
 manual = {"driver": None, "task": None, "ws": None}
 
 STATE_PERIOD = 0.2      # seconds between state pushes on /ws/control
-# /ws/control commands that map straight onto a ManualDriver method.
-DRIVE_COMMANDS = {"speed_up", "slow_down", "turn_right", "turn_left", "all_stop"}
-# ... and those that take a "level" argument.
-LEVEL_COMMANDS = {"set_speed", "set_steer"}
+# /ws/control driving commands, one per button on the page's control pad: the
+# telemetry event each is logged as, and the ManualDriver methods it calls.
+PAD_COMMANDS = {
+    "speed_up":      ("FORWARD",       ("speed_up",)),
+    "slow_down":     ("REVERSE",       ("slow_down",)),
+    "turn_left":     ("LEFT",          ("turn_left",)),
+    "turn_right":    ("RIGHT",         ("turn_right",)),
+    "forward_left":  ("FORWARD_LEFT",  ("speed_up", "turn_left")),
+    "forward_right": ("FORWARD_RIGHT", ("speed_up", "turn_right")),
+    "reverse_left":  ("REVERSE_LEFT",  ("slow_down", "turn_left")),
+    "reverse_right": ("REVERSE_RIGHT", ("slow_down", "turn_right")),
+    "all_stop":      ("STOP",          ("all_stop",)),
+    "straight":      ("STRAIGHT",      ("straighten",)),
+}
+# ... and those that take a "level" argument (clicks on the speed and steering
+# bars), likewise.
+LEVEL_COMMANDS = {"set_speed": "SPEED_BAR", "set_steer": "STEER_BAR"}
 
 INDEX_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "web", "index.html")
@@ -127,6 +149,8 @@ class LogHub:
 
 
 log_hub = LogHub()
+telemetry_hub = LogHub()
+telemetry = Telemetry(publish=telemetry_hub.publish)
 
 
 class Timestamped:
@@ -258,6 +282,17 @@ def car_state():
     }
 
 
+def telemetry_active():
+    """Whether the car's readings are worth logging as STATUS events: connected
+    and homed, and not probing the stops right now (re-homing holds car_lock
+    outside a mission or manual control, or flags the manual driver)."""
+    if not connected() or not car["homed"]:
+        return False
+    if manual_active():
+        return not manual["driver"].homing
+    return mission_active() or not car_lock.locked()
+
+
 async def keepalive():
     """Feed the watchdog while connected so an idle connection isn't dropped.
     Missions feed it themselves too; the extra feeds are harmless."""
@@ -281,9 +316,11 @@ async def lifespan(_app):
         except ConnectionError as e:
             print(f"Startup: {e} Not connected; try POST /connect.")
     keepalive_task = asyncio.create_task(keepalive())
+    monitor_task = asyncio.create_task(telemetry.monitor(telemetry_active))
     yield
     # Shutdown: stop any mission (drive_session stops the motors) and disconnect.
     keepalive_task.cancel()
+    monitor_task.cancel()
     await release_manual()
     if mission_task is not None and not mission_task.done():
         mission_task.cancel()
@@ -322,8 +359,18 @@ async def index():
 
 @app.websocket("/ws/logs")
 async def logs_ws(ws: WebSocket):
+    await stream_hub(ws, log_hub)
+
+
+@app.websocket("/ws/telemetry")
+async def telemetry_ws(ws: WebSocket):
+    await stream_hub(ws, telemetry_hub)
+
+
+async def stream_hub(ws, hub):
+    """Send a hub's recent history, then each new line, until the page goes."""
     await ws.accept()
-    history, q = log_hub.subscribe()
+    history, q = hub.subscribe()
 
     async def pump():
         for line in history:
@@ -341,7 +388,7 @@ async def logs_ws(ws: WebSocket):
         pass                                       # viewer closed the page
     finally:
         pump_task.cancel()
-        log_hub.unsubscribe(q)
+        hub.unsubscribe(q)
 
 
 @app.websocket("/ws/control")
@@ -403,7 +450,8 @@ async def control_command(ws, cmd, msg):
             return reason
         if not car["homed"]:
             return "The steering isn't homed; POST /recenter first."
-        driver = ManualDriver(car["client"], car["char"])
+        driver = ManualDriver(car["client"], car["char"],
+                              on_safety_stop=log_safety_stop)
         manual.update(driver=driver, ws=ws,
                       task=asyncio.create_task(_run_manual(driver)))
         return None
@@ -411,18 +459,35 @@ async def control_command(ws, cmd, msg):
         if in_control:
             await release_manual()
         return None
-    if cmd not in DRIVE_COMMANDS and cmd not in LEVEL_COMMANDS:
+    if cmd not in PAD_COMMANDS and cmd not in LEVEL_COMMANDS:
         return f"Unknown command: {cmd!r}"
     if not in_control:
         return "Take control first."
+    before = (driver.speed, driver.steer)
     if cmd in LEVEL_COMMANDS:
         level = msg.get("level")
         if type(level) is not int:
             return f"{cmd} needs an integer \"level\"."
         getattr(driver, cmd)(level)                # e.g. driver.set_speed(3)
+        event, detail = LEVEL_COMMANDS[cmd], f"level {_lvl(level)}; "
     else:
-        getattr(driver, cmd)()                     # e.g. driver.speed_up()
+        event, methods = PAD_COMMANDS[cmd]
+        for method in methods:
+            getattr(driver, method)()              # e.g. driver.speed_up()
+        detail = ""
+    telemetry.control(event, detail
+                      + f"speed {_lvl(before[0])} -> {_lvl(driver.speed)}, "
+                      + f"steer {_lvl(before[1])} -> {_lvl(driver.steer)}")
     return None
+
+
+def log_safety_stop(reason, speed):
+    telemetry.status("SAFETY_STOP", f"{reason}; speed {_lvl(speed)} -> 0")
+
+
+def _lvl(level):
+    """A signed level as shown in the telemetry log: +2, 0, -1."""
+    return f"{level:+d}" if level else "0"
 
 
 @app.get("/state")

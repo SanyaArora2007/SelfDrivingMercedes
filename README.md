@@ -35,7 +35,8 @@ Click [here](https://youtu.be/4X625ZH-nY0) to see a video.
 | `DriveServer.py` | Web server: starts the same obstacle-avoidance run over HTTP (`POST /run`, `POST /recenter`), and drives the car by hand from the web page |
 | `car_control.py` | Shared library used by `DriveCar.py` and `DriveServer.py` |
 | `manual_control.py` | Remote-control driving for `DriveServer.py`: speed and steering levels, safety stops |
-| `web/index.html` | Web page served by `DriveServer.py` at `/`: remote-control buttons, live telemetry and the car's log |
+| `telemetry.py` | Writes `telemetry.log`: every control-pad command (CONTROL) and what the car actually did (STATUS: speed, steering, front distance) |
+| `web/index.html` | Web page served by `DriveServer.py` at `/`: remote-control buttons, live telemetry, and the server log or telemetry log |
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
 | `requirements.txt` | Python packages to install into the venv |
