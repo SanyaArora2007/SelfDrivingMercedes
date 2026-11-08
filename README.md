@@ -171,6 +171,11 @@ The full calibration only runs again when there's no saved center, when the read
 doesn't make sense, or when you ask for it (`POST /recenter`, the page's **Recenter
 steering** button, or `DriveCar.py --recalibrate`).
 
+Straight-ahead isn't exactly halfway between the end stops on this car, so it has a
+**trim**: the page's trim buttons (or `POST /trim`) nudge straight-ahead left or right
+while you watch the wheels, and the setting is saved, so it survives restarts and
+recalibration.
+
 ---
 
 ## Distance sensor

@@ -197,6 +197,12 @@
         <button id="recenter" type="button" disabled>Recenter steering</button>
         <span class="mode">Car: <b id="mode">—</b></span>
       </div>
+      <div class="row">
+        <span class="mode">Straight-ahead trim:</span>
+        <button id="trim-left" type="button" title="Move straight ahead left" disabled>◀</button>
+        <b id="trim" class="mode">—</b>
+        <button id="trim-right" type="button" title="Move straight ahead right" disabled>▶</button>
+      </div>
       <div class="gauge">
         <span class="label">Speed</span><div class="segs" id="speed-segs" data-cmd="set_speed"></div>
         <span class="val" id="speed-val">—</span>
@@ -363,6 +369,10 @@
     $("connect").disabled = !s || connected || !free;
     $("disconnect").disabled = !connected || !free;
     $("recenter").disabled = !connected || !(free || controller);
+    const canTrim = !$("recenter").disabled && s.homed;
+    $("trim-left").disabled = $("trim-right").disabled = !canTrim;
+    $("trim").textContent = s && s.homed && s.steer.trim_deg !== undefined
+      ? `${s.steer.trim_deg >= 0 ? "+" : ""}${s.steer.trim_deg}°` : "—";
     const engage = $("engage");
     engage.disabled = !connected || !(free || controller);
     engage.textContent = controller ? "Release control" : "Take control";
@@ -422,18 +432,25 @@
   }
   $("engage").onclick = () => send(state && state.controller ? "release" : "engage");
 
-  async function post(path, busyText) {
+  async function post(path, busyText, body) {
     showMsg(busyText, false);
     try {
-      const r = await fetch(path, { method: "POST" });
-      const body = await r.json().catch(() => ({}));
-      if (r.ok) showMsg(`${path}: ${body.status || "ok"}`, false);
-      else showMsg(`${path}: ${body.detail || r.statusText}`, true);
+      const r = await fetch(path, body === undefined ? { method: "POST" } : {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const reply = await r.json().catch(() => ({}));
+      if (r.ok) showMsg(`${path}: ${reply.status || "ok"}`, false);
+      else showMsg(`${path}: ${reply.detail || r.statusText}`, true);
     } catch (e) {
       showMsg(`${path}: ${e}`, true);
     }
   }
   $("recenter").onclick = () => post("/recenter", "Recentering the steering…");
+  const TRIM_STEP = 5;     // motor degrees per click, about 0.8 deg at the wheels
+  $("trim-left").onclick = () => post("/trim", "Trimming left…", { degrees: -TRIM_STEP });
+  $("trim-right").onclick = () => post("/trim", "Trimming right…", { degrees: TRIM_STEP });
   $("connect").onclick = () => post("/connect", "Connecting to the car…");
   $("disconnect").onclick = () => post("/disconnect", "Disconnecting…");
 

@@ -30,6 +30,7 @@ Endpoints:
     POST /run                       start a mission with the default duration
     POST /run  {"duration": 60}     same as `DriveCar.py --duration 60`
     POST /recenter                  re-calibrate the steering (both end stops)
+    POST /trim {"degrees": 5}       move straight ahead 5 motor degrees right
     POST /connect                   connect to the BuWizz and home the steering
     POST /disconnect                close the BuWizz connection
 
@@ -300,9 +301,17 @@ class RunRequest(BaseModel):
                     f"same as `DriveCar.py --duration`.")
 
 
+class TrimRequest(BaseModel):
+    degrees: int = Field(
+        ..., ge=-30, le=30,
+        description="Motor degrees to move straight ahead by (+ = right); "
+                    "about 6 motor degrees per degree at the wheels.")
+
+
 def steering():
     cal = car_control.steer_cal
-    return {k: cal[k] for k in ("center", "half", "lock_left", "lock_right")}
+    return {"trim": car_control.steer_trim(),
+            **{k: cal[k] for k in ("center", "half", "lock_left", "lock_right")}}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -446,6 +455,28 @@ async def recenter():
     if not car["homed"]:
         raise HTTPException(status_code=500, detail="Steering homing failed.")
     return {"status": "recentered", **steering()}
+
+
+@app.post("/trim")
+async def trim(req: TrimRequest):
+    """Adjust straight ahead live; the new trim is saved for later sessions."""
+    if not connected() or not car["homed"]:
+        raise HTTPException(status_code=409,
+                            detail="Connect and home the steering first.")
+    if manual_active():
+        # The manual driver re-sends the steering target 20 times a second,
+        # so the wheels follow the new straight ahead on their own.
+        car_control.trim_steering(req.degrees)
+    else:
+        check_ready()
+        async with car_lock:
+            car_control.trim_steering(req.degrees)
+            try:
+                await car_control.servo_to(car["client"], car["char"],
+                                           car_control.steer_target(0.0))
+            except ConnectionError as e:
+                raise HTTPException(status_code=503, detail=str(e))
+    return {"status": "trimmed", **steering()}
 
 
 @app.post("/connect")

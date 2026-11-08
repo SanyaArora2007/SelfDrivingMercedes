@@ -88,6 +88,7 @@ CAL_LAG      = 10    # if the shaft trails the target by more than this -> at a 
 CAL_BACKOFF  = 60    # back away this far before probing, for a run-up to the stop
 CAL_STOP_STEPS = 3   # steps in a row that barely move before we call it a stop
 CAL_ABS_SLACK = 20   # how far past full lock an absolute reading may still be
+TRIM_MAX = 60        # how far straight ahead may be trimmed from the stops' midpoint
 STEER_MARGIN = 0.85  # with straight ahead at the midpoint, use this fraction of
                      # the half-lock (the rest is clearance from the stops)
 
@@ -99,7 +100,7 @@ STEER_MARGIN = 0.85  # with straight ahead at the midpoint, use this fraction of
 # absolute angles and re-derive both on each connect, with no probing (see
 # abs_home()). Straight ahead isn't necessarily the midpoint: on this car the
 # left side has more travel. Their difference is the steering trim, which a
-# full calibration keeps; set it by editing center_abs in the cache.
+# full calibration keeps; set it with trim_steering() (the page's trim buttons).
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "steer_cal.json")
 
@@ -146,8 +147,8 @@ last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
 # Filled in by calibrate_steering()/abs_home() (see set_steering()): straight
 # ahead and the half-lock in motor degrees, each side's usable lock from
 # straight ahead, and the cached absolute angles.
-steer_cal = {"center": 0.0, "half": 0.0, "lock_left": 0.0, "lock_right": 0.0,
-             "center_abs": None, "mid_abs": None}
+steer_cal = {"center": 0.0, "mid": 0.0, "half": 0.0, "lock_left": 0.0,
+             "lock_right": 0.0, "center_abs": None, "mid_abs": None}
 
 
 def load_cache():
@@ -417,9 +418,30 @@ def set_steering(center, mid, half):
     clearance STEER_MARGIN leaves when straight ahead is the midpoint -- so a
     trimmed center never steers into a stop."""
     clearance = (1 - STEER_MARGIN) * half
-    steer_cal.update(center=center, half=half,
+    steer_cal.update(center=center, mid=mid, half=half,
                      lock_right=max(0.0, mid + half - center - clearance),
                      lock_left=max(0.0, center - (mid - half) - clearance))
+
+
+def steer_trim():
+    """How far straight ahead is from the stops' midpoint (+ = right), in
+    motor degrees."""
+    return round(steer_cal["center"] - steer_cal["mid"])
+
+
+def trim_steering(delta):
+    """Move straight ahead by `delta` motor degrees (+ = right), keeping it
+    within TRIM_MAX of the stops' midpoint, and cache the new trim so homing
+    and recalibration keep it. Doesn't move the servo: the caller re-sends the
+    steering target. Returns the new trim."""
+    trim = max(-TRIM_MAX, min(TRIM_MAX, steer_trim() + delta))
+    set_steering(steer_cal["mid"] + trim, steer_cal["mid"], steer_cal["half"])
+    if steer_cal["mid_abs"] is not None:
+        steer_cal["center_abs"] = wrap180(steer_cal["mid_abs"] + trim)
+        save_cache()
+    print(f"Steering trim {trim:+d} deg (straight ahead abs_pos="
+          f"{steer_cal['center_abs']} deg)")
+    return trim
 
 
 async def calibrate_steering(client, char, trim=0):

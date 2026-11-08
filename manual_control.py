@@ -191,6 +191,7 @@ def telemetry(connected):
             # Actual angle as a fraction of the usable lock (-1 left .. +1 right).
             "actual_frac": round((pos - cal["center"]) / lock, 2) if pos is not None and lock else None,
             "current_a": steer_a,
+            "trim_deg": car_control.steer_trim(),    # straight ahead vs. midpoint
         },
         "battery": {"vbat": vbat, "temp_c": s.get("temp"), "error": s.get("error")},
         "sensor": {
