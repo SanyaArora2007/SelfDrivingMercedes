@@ -39,6 +39,7 @@ Click [here](https://youtu.be/4X625ZH-nY0) to see a video.
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
 | `requirements.txt` | Python packages to install into the venv |
+| `restart.sh` | Starts (or restarts) `DriveServer.py` in the background on the Pi; also run at boot |
 
 ### Setup
 
@@ -78,6 +79,15 @@ Useful command-line arguments:
 | `--duration SECONDS` | How long to drive (default 120 s = 2 min) |
 | `--sensor-mm MM` | Distance that triggers avoidance (default 250 mm) |
 | `--recalibrate` | Re-run the full steering calibration and exit |
+
+To drive the car from a browser instead, run the web server with `restart.sh`. It stops the
+server if it's already running, then starts it in the background, logging to `server.log`;
+the page is at `http://<pi-address>:8000/`. To start it whenever the Pi boots, add this
+line with `crontab -e`:
+
+```
+@reboot /home/sanyaarora/SelfDrivingMercedes/restart.sh
+```
 
 ---
 
