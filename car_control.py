@@ -132,6 +132,17 @@ STALL_VEL   = 4       # |drive velocity| below this counts as "not moving"
 STALL_TIME  = 0.4     # must stay stalled this long (while powered) -> obstacle
 DRIVE_GRACE = 0.6     # ignore stalls this long after starting to drive (spin-up)
 
+# ---- Status report sanity check ---------------------------------------------
+# Now and then the brick sends a status report with some bytes zeroed: seen in
+# the steering position, e.g. -14 arriving as 0, -256, 65522 or -16776974, one
+# report at a time. A report is dropped (the previous one stays current) when it
+# disagrees with what the steering motor can physically do. A real change would
+# persist, so after STATUS_MAX_DROPS dropped reports in a row the next is taken.
+STATUS_MAX_STEER_STEP = 60  # deg; the servo can't turn further in one report
+STATUS_ABS_TOL = 10         # deg; pos and abs_pos keep a fixed offset (mod 360)
+STATUS_MAX_DROPS = 3
+STATUS_DROP_LOG_S = 10      # report dropped reports at most this often
+
 # ---- Front distance sensor (VL53L0X) ----------------------------------------
 # When driving forward, an obstacle seen within this distance triggers the same
 # recovery as a physical hit. 250 mm gives the car room to stop/turn before
@@ -141,6 +152,9 @@ SENSOR_TRIGGER_MM = 250  # obstacle if the front sensor reads <= this (and > 0)
 SENSOR_MIN_MM     = 1    # readings at/below this are treated as invalid/noise
 
 latest_status = {}
+# The status filter's state: the steering motor's pos-to-abs_pos offset, the
+# drops in a row, and the drops not yet reported (see on_status()).
+status_filter = {"offset": None, "drops": 0, "unreported": 0, "logged": 0.0}
 disconnect_info = {"reason": None}
 distance_sensor = None    # set in main() when the VL53L0X is present
 last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
@@ -257,8 +271,51 @@ def parse_status(data):
 
 def on_status(_sender, data):
     s = parse_status(data)
-    if s:
+    if not s:
+        return
+    f = status_filter
+    if _plausible(s) or f["drops"] >= STATUS_MAX_DROPS:
+        if f["drops"] >= STATUS_MAX_DROPS:
+            f["offset"] = None                     # relearn from this report
+        f["drops"] = 0
         latest_status.update(s)
+        if f["offset"] is None:
+            f["offset"] = _abs_offset(s)
+    else:
+        f["drops"] += 1
+        f["unreported"] += 1
+        now = time.monotonic()
+        if now - f["logged"] >= STATUS_DROP_LOG_S:
+            pos = s["pos"][STEER_PORT - 1] if len(s["pos"]) >= STEER_PORT else None
+            print(f"  [!] dropped {f['unreported']} corrupt status report(s) "
+                  f"(latest: steering pos={pos} deg, was {steer_pos()} deg)")
+            f.update(unreported=0, logged=now)
+
+
+def _abs_offset(s):
+    """The steering motor's abs_pos minus pos (mod 360) in a report, or None
+    if it doesn't report an absolute angle."""
+    i = STEER_PORT - 1
+    if len(s["pos"]) <= i or s["type"][i] != STEER_MOTOR_TYPE:
+        return None
+    return wrap180(s["abs_pos"][i] - s["pos"][i])
+
+
+def _plausible(s):
+    """Whether a status report is consistent with the last one kept."""
+    if not latest_status:
+        return True
+    if s["type"] != latest_status.get("type"):
+        return False                               # motors don't change mid-run
+    i = STEER_PORT - 1
+    old = latest_status.get("pos", [])
+    if len(s["pos"]) > i and len(old) > i:
+        if abs(s["pos"][i] - old[i]) > STATUS_MAX_STEER_STEP:
+            return False
+        offset, expected = _abs_offset(s), status_filter["offset"]
+        if None not in (offset, expected) and abs(wrap180(offset - expected)) > STATUS_ABS_TOL:
+            return False
+    return True
 
 
 async def find_app_char(client):
@@ -549,6 +606,8 @@ def drive_vel():
     return v[DRIVE_PORT - 1] if len(v) >= DRIVE_PORT else None
 
 
+
+
 def init_sensor():
     """Bring up the VL53L0X front sensor if the libraries and hardware are
     present. Sets the module-level `distance_sensor`. Returns True on success."""
@@ -768,6 +827,7 @@ async def connect():
     `await client.disconnect()`."""
     # Clear state left over from a previous connection in this process.
     latest_status.clear()
+    status_filter.update(offset=None, drops=0, unreported=0)
     disconnect_info["reason"] = None
 
     print(f"Scanning for {DEVICE_NAME} ...")
