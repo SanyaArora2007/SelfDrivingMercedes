@@ -131,6 +131,7 @@ SENSOR_MIN_MM     = 1    # readings at/below this are treated as invalid/noise
 latest_status = {}
 disconnect_info = {"reason": None}
 distance_sensor = None    # set in main() when the VL53L0X is present
+last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
 # Filled in by calibrate_steering()/quick_home(): motor-degree center and half.
 steer_cal = {"center": 0.0, "half": 0.0}
 
@@ -450,8 +451,19 @@ def read_distance():
     try:
         mm = distance_sensor.range
     except Exception:
-        return None
-    return mm if mm > SENSOR_MIN_MM else None
+        mm = None
+    if mm is not None and mm <= SENSOR_MIN_MM:
+        mm = None
+    last_distance.update(mm=mm, t=time.time())
+    return mm
+
+
+def recent_distance(max_age=0.25):
+    """The last distance reading if it's fresh (driving reads the sensor every
+    tick), otherwise a new reading. For display; avoids doubling sensor reads."""
+    if time.time() - last_distance["t"] <= max_age:
+        return last_distance["mm"]
+    return read_distance()
 
 
 async def drive(client, char, pwm, seconds, steer_deg, detect=True, accelerate=False,
@@ -701,19 +713,24 @@ async def drive_session(client, char, selftest=False, duration=MISSION_TIME,
     except ConnectionError as e:
         print(f"\nAborting: {e}")
     finally:
-        # Only try to stop the motors if we're still connected; otherwise
-        # the write would just raise again and mask the real cause.
-        if client.is_connected:
-            try:
-                await send(client, char, motor_packet({}))  # all stop
-                await asyncio.sleep(0.2)
-                # Don't leave the wheels turned (the drive stays at zero).
-                await servo_to(client, char, steer_target(0.0))
-                print("\nDone. Motors stopped, wheels straight.")
-            except Exception as e:
-                print(f"\nCould not send stop command: {e}")
-        else:
-            print("\nConnection already lost; brick auto-stops via watchdog.")
+        await stop_and_straighten(client, char)
+
+
+async def stop_and_straighten(client, char):
+    """Stop the motors and straighten the wheels at the end of a session."""
+    # Only try to stop the motors if we're still connected; otherwise the
+    # write would just raise again and mask the real cause.
+    if client.is_connected:
+        try:
+            await send(client, char, motor_packet({}))  # all stop
+            await asyncio.sleep(0.2)
+            # Don't leave the wheels turned (the drive stays at zero).
+            await servo_to(client, char, steer_target(0.0))
+            print("\nDone. Motors stopped, wheels straight.")
+        except Exception as e:
+            print(f"\nCould not send stop command: {e}")
+    else:
+        print("\nConnection already lost; brick auto-stops via watchdog.")
 
 
 async def main(recalibrate=False, selftest=False, duration=MISSION_TIME,
