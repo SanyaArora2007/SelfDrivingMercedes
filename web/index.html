@@ -96,7 +96,7 @@
   .pad {
     display: grid;
     grid-template-columns: repeat(3, 76px);
-    grid-template-rows: repeat(3, 56px);
+    grid-template-rows: repeat(3, 56px) 40px;
     gap: 6px;
   }
   .pad button { font-size: 14px; padding: 0; }
@@ -104,6 +104,8 @@
   .pad .left  { grid-area: 2 / 1; }
   .pad .stop  { grid-area: 2 / 2; background: var(--stop); border-color: var(--stop);
                 color: #fff; font-weight: 700; }
+  .pad .straight { grid-area: 4 / 1 / 5 / 4; background: var(--ok); border-color: var(--ok);
+                   color: #fff; font-weight: 700; }
   .pad .right { grid-area: 2 / 3; }
   .pad .down  { grid-area: 3 / 2; }
   .pad .up-left    { grid-area: 1 / 1; }
@@ -190,6 +192,8 @@
       <button class="stop" data-cmd="all_stop" type="button" disabled>STOP</button>
       <button class="right" data-cmd="turn_right" type="button" disabled>Right ▶</button>
       <button class="down" data-cmd="slow_down" type="button" disabled>▼ Reverse</button>
+      <!-- Same as clicking the middle of the steering bar. -->
+      <button class="straight" data-cmd="set_steer" data-level="0" type="button" disabled>STRAIGHT</button>
     </div>
     <div class="side">
       <div class="row">
@@ -418,7 +422,13 @@
   render();
 
   document.querySelectorAll(".pad button").forEach((b) => {
-    b.onclick = () => b.dataset.cmd.split(" ").forEach((cmd) => send(cmd));
+    b.onclick = () => {
+      if (b.dataset.level !== undefined) {
+        send(b.dataset.cmd, { level: Number(b.dataset.level) });
+      } else {
+        b.dataset.cmd.split(" ").forEach((cmd) => send(cmd));
+      }
+    };
   });
   // Click a segment to jump straight to that level (the middle one is stop /
   // straight ahead).
