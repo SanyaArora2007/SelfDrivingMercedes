@@ -213,14 +213,14 @@ def parse_status(data):
         "temp": data[9],
         "type": [],     # PU motor type per port (0 = none/unknown), ports 1-4
         "vel": [],      # PU port velocities (signed), ports 1-4
-        "abs_pos": [],  # absolute shaft angle 0-359 deg, ports 1-4
+        "abs_pos": [],  # absolute shaft angle -180..179 deg, ports 1-4
         "pos": [],      # cumulative position in degrees (signed), ports 1-4
     }
-    # PoweredUp motor data: 8 bytes/port -> type(u8) vel(s8) abs_pos(u16) pos(s32)
+    # PoweredUp motor data: 8 bytes/port -> type(u8) vel(s8) abs_pos(s16) pos(s32)
     for i in range(4):
         base = 22 + i * 8
         if base + 8 <= len(data):
-            mtype, vel, abs_pos, pos = struct.unpack_from("<BbHi", data, base)
+            mtype, vel, abs_pos, pos = struct.unpack_from("<Bbhi", data, base)
             out["type"].append(mtype)
             out["vel"].append(vel)
             out["abs_pos"].append(abs_pos)
