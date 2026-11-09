@@ -97,7 +97,7 @@ mission_task: Optional[asyncio.Task] = None
 # car_lock) and the /ws/control socket that controls it.
 manual = {"driver": None, "task": None, "ws": None}
 
-STATE_PERIOD = 0.2      # seconds between state pushes on /ws/control
+STATE_PERIOD = 0.1      # seconds between state pushes on /ws/control
 # /ws/control driving commands, one per button on the page's control pad: the
 # telemetry event each is logged as, and the ManualDriver methods it calls.
 PAD_COMMANDS = {

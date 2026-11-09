@@ -34,6 +34,14 @@ from car_control import (DRIVE_PORT, STEER_PORT, WATCHDOG_FEED,
 # there and climb in steps of 8, topping out at 120.
 SPEED_PWM = (0, 84, 92, 100, 108, 116, 120)
 SPEED_LEVELS = len(SPEED_PWM) - 1
+
+# Estimated ground speed from the brick's drive velocity reading, and the
+# velocity each speed level settles at, both measured from telemetry on the
+# car (2026-11-08): approaching a wall straight ahead, the distance shrank by
+# 5.6 mm/s per unit of velocity (middle half of 253 samples: 4.4-6.7).
+MM_PER_VEL = 5.6
+STEADY_VEL_FORWARD = (0, 21, 34, 58, 83, 90, 93)    # by speed level 0..6
+STEADY_VEL_REVERSE = (0, 25, 47, 65, 89, 99, 118)   # reverse runs faster
 STEER_LEVELS = 2       # levels each side of center; the last one is full lock
 
 DEADMAN_S = 1.0        # stop driving if the page goes quiet this long
@@ -56,6 +64,17 @@ def speed_pwm(level):
     """Drive PWM for a signed speed level."""
     pwm = SPEED_PWM[abs(level)]
     return pwm if level >= 0 else -pwm
+
+
+def speed_ms(vel):
+    """Estimated ground speed (m/s, signed) for a drive velocity reading."""
+    return round(vel * MM_PER_VEL / 1000, 2)
+
+
+def expected_speed_ms(level):
+    """Estimated ground speed (m/s, signed) a speed level settles at."""
+    table = STEADY_VEL_FORWARD if level >= 0 else STEADY_VEL_REVERSE
+    return speed_ms(table[abs(level)] * (1 if level >= 0 else -1))
 
 
 def stop_distance(vel):
@@ -218,6 +237,7 @@ class ManualDriver:
 
     def state(self):
         return {"speed_level": self.speed, "speed_pwm": speed_pwm(self.speed),
+                "target_speed_ms": expected_speed_ms(self.speed),
                 "steer_level": self.steer}
 
 
@@ -233,12 +253,14 @@ def telemetry(connected):
     drive_a = _port(s.get("currents", []), DRIVE_PORT)
     steer_a = _port(s.get("currents", []), STEER_PORT)
     pos = _port(s.get("pos", []), STEER_PORT)
+    vel = _port(s.get("vel", []), DRIVE_PORT)
     cal = car_control.steer_cal
     lock = None if pos is None else cal["lock_right"] if pos >= cal["center"] else cal["lock_left"]
     mm = car_control.read_distance()
     return {
         "drive": {
-            "vel": _port(s.get("vel", []), DRIVE_PORT),    # brick's raw units
+            "vel": vel,                                     # brick's raw units
+            "speed_ms": None if vel is None else speed_ms(vel),   # estimate
             "current_a": drive_a,
             "power_w": round(vbat * drive_a, 1) if None not in (vbat, drive_a) else None,
         },
