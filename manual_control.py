@@ -46,7 +46,8 @@ LOOP_HZ = 20
 STOP_MM_SLOW, STOP_MM_FAST = 200, 350
 STOP_VEL_SLOW, STOP_VEL_FAST = 25, 110
 # Brake flag for the drive port in motor packets: with it set, zero power
-# brakes the motor instead of letting it coast. Used after a safety stop.
+# brakes the motor instead of letting it coast. Set whenever the speed is 0,
+# so STOP and the safety stops stop the car quickly.
 DRIVE_BRAKE = 1 << (DRIVE_PORT - 1)
 
 
@@ -83,7 +84,6 @@ class ManualDriver:
         self.on_safety_stop = on_safety_stop
         self.on_stall = on_stall
         self._stall = car_control.StallDetector()
-        self._braking = False          # brake (not coast) while the drive is off
         self.speed = 0                 # -SPEED_LEVELS .. +SPEED_LEVELS
         self.steer = 0                 # -STEER_LEVELS .. +STEER_LEVELS
         self.last_heard = time.time()
@@ -123,8 +123,6 @@ class ManualDriver:
     def set_speed(self, level):
         """Jump straight to a speed level (clamped to the range)."""
         self.speed = max(-SPEED_LEVELS, min(SPEED_LEVELS, level))
-        if self.speed != 0:
-            self._braking = False
 
     def set_steer(self, level):
         """Jump straight to a steering level (clamped to the range)."""
@@ -141,7 +139,7 @@ class ManualDriver:
                     await send(self.client, self.char, motor_ext_packet({
                         DRIVE_PORT: speed_pwm(self.speed),
                         STEER_PORT: int(steer_target(steer_frac(self.steer)))},
-                        brake=DRIVE_BRAKE if self._braking else 0))
+                        brake=DRIVE_BRAKE if self.speed == 0 else 0))
                     now = time.time()
                     if now - last_feed > WATCHDOG_FEED:
                         await feed_watchdog(self.client, self.char)
@@ -174,11 +172,10 @@ class ManualDriver:
             self._safety_stop("drive stalled")
 
     def _safety_stop(self, reason):
-        """Cut the drive and brake it, until the next Forward or Reverse."""
+        """Cut the drive (speed 0, so it's braked)."""
         print(f"    ! {reason} -> manual stop")
         speed = self.speed
         self.set_speed(0)
-        self._braking = True
         if self.on_safety_stop is not None:
             self.on_safety_stop(reason, speed)
 
