@@ -123,20 +123,6 @@
   #engage.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .mode { font-size: 13px; color: var(--muted); }
   .mode b { color: var(--text); }
-  .gauge { display: grid; grid-template-columns: 70px 1fr; gap: 4px 10px;
-           align-items: center; font-size: 13px; }
-  .gauge .label { color: var(--muted); }
-  .segs { display: flex; gap: 3px; }
-  .segs span { flex: 1; height: 14px; border-radius: 3px; background: var(--seg);
-               touch-action: manipulation; }
-  .segs span.zero { flex: 0 0 6px; }
-  .segs.clickable span { height: 22px; cursor: pointer; }
-  .segs.clickable span.zero { flex-basis: 12px; }
-  .segs.clickable span:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .segs span.on { background: var(--accent); }
-  .segs span.actual { outline: 2px solid var(--warn); outline-offset: -2px; }
-  .gauge .val { grid-column: 2; color: var(--muted); font-size: 12px;
-                font-variant-numeric: tabular-nums; }
   .dials {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -252,14 +238,8 @@
         <b id="trim" class="mode">—</b>
         <button id="trim-right" type="button" title="Move straight ahead right" disabled>▶</button>
       </div>
-      <div class="gauge">
-        <span class="label">Speed</span><div class="segs" id="speed-segs" data-cmd="set_speed"></div>
-        <span class="val" id="speed-val">—</span>
-        <span class="label">Steering</span><div class="segs" id="steer-segs" data-cmd="set_steer"></div>
-        <span class="val" id="steer-val">—</span>
-      </div>
       <div id="msg"></div>
-      <div class="hint">While in control: click the speed or steering bar to jump to a setting. Keys: ↑ ↓ speed, ← → steer, space = stop.</div>
+      <div class="hint">Keys while in control: ↑ ↓ speed, ← → steer, space = stop.</div>
     </div>
   </section>
 
@@ -420,26 +400,6 @@
   // Heartbeat: manual driving stops if the server stops hearing from us.
   setInterval(() => send("ping"), 250);
 
-  // Segmented bar from -n..+n; lights 0..level, rings the actual position.
-  function segments(el, n, level, actual) {
-    if (el.childElementCount !== 2 * n + 1) {
-      el.textContent = "";
-      for (let i = -n; i <= n; i++) {
-        const s = document.createElement("span");
-        s.dataset.level = i;
-        if (i === 0) s.className = "zero";
-        el.appendChild(s);
-      }
-    }
-    [...el.children].forEach((s, idx) => {
-      const i = idx - n;
-      const on = level !== null && i !== 0 &&
-                 ((level > 0 && i > 0 && i <= level) || (level < 0 && i < 0 && i >= level));
-      s.classList.toggle("on", on);
-      s.classList.toggle("actual", actual !== null && i === actual && i !== 0);
-    });
-  }
-
   // ---- dials --------------------------------------------------------------
   const SVGNS = "http://www.w3.org/2000/svg";
   const SPEED_MAX = 0.8;    // m/s at the end of the speed dial (shown in cm/s)
@@ -554,27 +514,9 @@
     engage.textContent = controller ? "Release control" : "Take control";
     engage.classList.toggle("on", controller);
     document.querySelectorAll(".pad button").forEach((b) => { b.disabled = !controller; });
-    for (const [id, what] of [["speed-segs", "speed"], ["steer-segs", "steering"]]) {
-      $(id).classList.toggle("clickable", controller);
-      $(id).title = controller ? `Click a segment to jump to that ${what}` : "";
-    }
 
     const lim = s ? s.limits : { speed_levels: 6, steer_levels: 2 };
     const m = s && s.manual;
-    segments($("speed-segs"), lim.speed_levels, m ? m.speed_level : null, null);
-    const actualFrac = s && s.steer.actual_frac;
-    const actualLevel = actualFrac === null || actualFrac === undefined ? null
-      : Math.max(-lim.steer_levels, Math.min(lim.steer_levels,
-                 Math.round(actualFrac * lim.steer_levels)));
-    segments($("steer-segs"), lim.steer_levels, m ? m.steer_level : null, actualLevel);
-    $("speed-val").textContent = !m ? "not under manual control"
-      : m.speed_level === 0 ? "stopped"
-      : `${m.speed_level > 0 ? "forward" : "reverse"} ${Math.abs(m.speed_level)}/${lim.speed_levels}  (pwm ${m.speed_pwm})`;
-    const steerWord = (l) => l === 0 ? "straight" : `${l > 0 ? "right" : "left"} ${Math.abs(l)}/${lim.steer_levels}`;
-    $("steer-val").textContent = (m ? `set ${steerWord(m.steer_level)}` : "—") +
-      (actualFrac === null || actualFrac === undefined ? ""
-        : `  ·  actual ${actualFrac >= 0 ? "+" : ""}${Math.round(actualFrac * 100)}% lock`);
-
     renderDials(s, m, lim);
     const b = s ? s.battery : {}, se = s ? s.sensor : {};
     $("t-vbat").textContent = fmt(b.vbat, "V");
@@ -590,16 +532,6 @@
   document.querySelectorAll(".pad button").forEach((b) => {
     b.onclick = () => send(b.dataset.cmd);
   });
-  // Click a segment to jump straight to that level (the middle one is stop /
-  // straight ahead).
-  for (const bar of [$("speed-segs"), $("steer-segs")]) {
-    bar.onclick = (e) => {
-      const level = e.target.dataset.level;
-      if (level !== undefined && state && state.controller) {
-        send(bar.dataset.cmd, { level: Number(level) });
-      }
-    };
-  }
   $("engage").onclick = () => send(state && state.controller ? "release" : "engage");
 
   async function post(path, busyText, body) {

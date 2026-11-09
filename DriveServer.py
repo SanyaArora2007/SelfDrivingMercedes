@@ -48,8 +48,6 @@ for their work to finish. Every endpoint replies 409 while the car is busy
     reverse_left, reverse_right  one speed and one steering level together
     all_stop                     speed to 0
     straight                     steering to 0
-    set_speed + "level": n       jump straight to speed level n
-    set_steer + "level": n       jump straight to steering level n
     ping                         heartbeat; manual driving stops without one
 Server -> page: {"type": "state", ...} (as GET /state, plus whether this page
 holds control) a few times a second, and {"type": "error", "msg": ...}.
@@ -61,7 +59,7 @@ dies. Console output is timestamped, and also streamed to the web page; this
 needs the server started as `python3 DriveServer.py` (not via the uvicorn CLI).
 
 Every driving command is also a CONTROL event in telemetry.log, named after the
-page's button (or bar) it comes from; a monitor adds STATUS events for what the
+page's button it comes from; a monitor adds STATUS events for what the
 car actually does (see telemetry.py).
 """
 
@@ -112,9 +110,6 @@ PAD_COMMANDS = {
     "all_stop":      ("STOP",          ("all_stop",)),
     "straight":      ("STRAIGHT",      ("straighten",)),
 }
-# ... and those that take a "level" argument (clicks on the speed and steering
-# bars), likewise.
-LEVEL_COMMANDS = {"set_speed": "SPEED_BAR", "set_steer": "STEER_BAR"}
 
 INDEX_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "web", "index.html")
@@ -415,11 +410,10 @@ async def control_ws(ws: WebSocket):
         while True:
             text = await ws.receive_text()
             try:
-                msg = json.loads(text)
-                cmd = msg.get("cmd")
+                cmd = json.loads(text).get("cmd")
             except (ValueError, AttributeError):
-                msg, cmd = {}, None
-            error = await control_command(ws, cmd, msg)
+                cmd = None
+            error = await control_command(ws, cmd)
             if error:
                 outbox.put_nowait({"type": "error", "msg": error})
             if cmd != "ping":
@@ -432,9 +426,8 @@ async def control_ws(ws: WebSocket):
             await release_manual()                 # don't drive on unattended
 
 
-async def control_command(ws, cmd, msg):
-    """Carry out one /ws/control command (the parsed message is `msg`).
-    Returns an error message or None."""
+async def control_command(ws, cmd):
+    """Carry out one /ws/control command. Returns an error message or None."""
     driver = manual["driver"] if manual_active() else None
     in_control = driver is not None and manual["ws"] is ws
     if in_control:
@@ -460,25 +453,16 @@ async def control_command(ws, cmd, msg):
         if in_control:
             await release_manual()
         return None
-    if cmd not in PAD_COMMANDS and cmd not in LEVEL_COMMANDS:
+    if cmd not in PAD_COMMANDS:
         return f"Unknown command: {cmd!r}"
     if not in_control:
         return "Take control first."
     before = (driver.speed, driver.steer)
-    if cmd in LEVEL_COMMANDS:
-        level = msg.get("level")
-        if type(level) is not int:
-            return f"{cmd} needs an integer \"level\"."
-        getattr(driver, cmd)(level)                # e.g. driver.set_speed(3)
-        event, detail = LEVEL_COMMANDS[cmd], f"level {_lvl(level)}; "
-    else:
-        event, methods = PAD_COMMANDS[cmd]
-        for method in methods:
-            getattr(driver, method)()              # e.g. driver.speed_up()
-        detail = ""
-    telemetry.control(event, detail
-                      + f"speed {_lvl(before[0])} -> {_lvl(driver.speed)}, "
-                      + f"steer {_lvl(before[1])} -> {_lvl(driver.steer)}")
+    event, methods = PAD_COMMANDS[cmd]
+    for method in methods:
+        getattr(driver, method)()                  # e.g. driver.speed_up()
+    telemetry.control(event, f"speed {_lvl(before[0])} -> {_lvl(driver.speed)}, "
+                             f"steer {_lvl(before[1])} -> {_lvl(driver.steer)}")
     return None
 
 
