@@ -32,8 +32,35 @@ Click [here](https://youtu.be/4X625ZH-nY0) to see a video.
 | File | What it is |
 |---|---|
 | `DriveCar.py` | Main program: Controlled through Bluetooth, steering calibration, obstacle avoidance |
+| `DriveServer.py` | Web server: starts the same obstacle-avoidance run over HTTP (`POST /run`, `POST /recenter`), and drives the car by hand from the web page |
+| `car_control.py` | Shared library used by `DriveCar.py` and `DriveServer.py` |
+| `manual_control.py` | Remote-control driving for `DriveServer.py`: speed and steering levels, safety stops |
+| `telemetry.py` | Writes `telemetry.log`: every control-pad command (CONTROL) and what the car actually did (STATUS: speed, steering, front distance) |
+| `web/index.html` | Web page served by `DriveServer.py` at `/`: remote-control buttons, live telemetry, and the server log or telemetry log |
 | `sensor-test.py` | Continuously getting VL52L0X distance sensor readings |
 | `steer_cal.json` | Steering calibration |
+| `requirements.txt` | Python packages to install into the venv |
+| `restart.sh` | Starts (or restarts) `DriveServer.py` in the background on the Pi; also run at boot |
+
+### Setup
+
+On the Raspberry Pi, create the virtual environment inside the project folder:
+
+```bash
+cd ~/SelfDrivingMercedes
+sudo apt install python3-lgpio python3-rpi-lgpio python3-libgpiod   # usually preinstalled on Raspberry Pi OS
+python3 -m venv --system-site-packages venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+`--system-site-packages` is required: the sensor library talks to the Pi's GPIO
+through the Debian `python3-*gpio` packages installed by `apt`, which a plain venv
+can't see. A venv also can't be moved or renamed once created (its scripts store
+their absolute path), so if the folder moves, delete `venv/` and run these steps again.
+
+On a laptop the same steps work without the `apt` line; the sensor library is
+skipped and the car uses stall detection only.
 
 ### Running it
 
@@ -53,6 +80,15 @@ Useful command-line arguments:
 | `--duration SECONDS` | How long to drive (default 120 s = 2 min) |
 | `--sensor-mm MM` | Distance that triggers avoidance (default 250 mm) |
 | `--recalibrate` | Re-run the full steering calibration and exit |
+
+To drive the car from a browser instead, run the web server with `restart.sh`. It stops the
+server if it's already running, then starts it in the background, logging to `server.log`;
+the page is at `http://<pi-address>:8000/`. To start it whenever the Pi boots, add this
+line with `crontab -e`:
+
+```
+@reboot /home/sanyaarora/SelfDrivingMercedes/restart.sh
+```
 
 ---
 
@@ -126,6 +162,21 @@ is straight. The calibration works by:
 - Using the two end stops, it records the **center** (midpoint between the two) and the
   **half-lock span** (how far full lock is from center, in motor degrees, which is about
   +/-137 degrees on this car).
+
+The steering motor also reports an **absolute angle** (-180 to 179 degrees) that does *not*
+reset at power-up. Because the whole steering range is less than one full turn of the
+motor, each absolute angle matches exactly one steering position. So the calibration also
+saves the center's absolute angle in `steer_cal.json`, and after that the car finds
+straight-ahead just by reading the motor, without driving the wheels into the end stops.
+The full calibration only runs again when there's no saved center, when the reading
+doesn't make sense, or when you ask for it (`POST /recenter`, the page's **Recenter
+steering** button, or `DriveCar.py --recalibrate`).
+
+Straight-ahead isn't exactly halfway between the end stops on this car, so it has a
+**trim**: the page's trim buttons (or `POST /trim`) nudge straight-ahead left or right
+while you watch the wheels, and the setting is saved, so it survives restarts and
+recalibration.
+
 ---
 
 ## Distance sensor

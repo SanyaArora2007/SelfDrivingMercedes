@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Driving Mercedes</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7385;
+    --border: #dde1e8;
+    --seg: #e6e9ef;
+    --accent: #2f6fdb;
+    --log-bg: #11151c;
+    --log-text: #d6dbe4;
+    --log-dim: #7d8696;
+    --log-control: #8ab4ff;
+    --warn: #f0b429;
+    --error: #ff6b6b;
+    --ok: #2f9e44;
+    --off: #c92a2a;
+    --stop: #d6336c;
+    --reverse: #f08c00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1016;
+      --panel: #161b24;
+      --text: #e4e8ef;
+      --muted: #8a93a5;
+      --border: #262d3a;
+      --seg: #232a36;
+      --accent: #5b8def;
+      --log-bg: #0a0d12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  h1 { font-size: 20px; margin: 0; flex: 1; }
+  h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .04em; }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--off);
+  }
+  .status.live .dot { background: var(--ok); }
+  button {
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    /* A quick second tap is a second press, not a double-tap zoom (iOS);
+       pinch-to-zoom still works. */
+    touch-action: manipulation;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .control {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 76px);
+    grid-template-rows: repeat(3, 56px) 40px;
+    gap: 6px;
+  }
+  .pad button { font-size: 14px; padding: 0; }
+  .pad .up    { grid-area: 1 / 2; }
+  .pad .left  { grid-area: 2 / 1; }
+  .pad .stop  { grid-area: 2 / 2; background: var(--stop); border-color: var(--stop);
+                color: #fff; font-weight: 700; }
+  .pad .straight { grid-area: 4 / 1 / 5 / 4; background: var(--ok); border-color: var(--ok);
+                   color: #fff; font-weight: 700; }
+  .pad .right { grid-area: 2 / 3; }
+  .pad .down  { grid-area: 3 / 2; }
+  .pad .up-left    { grid-area: 1 / 1; }
+  .pad .up-right   { grid-area: 1 / 3; }
+  .pad .down-left  { grid-area: 3 / 1; }
+  .pad .down-right { grid-area: 3 / 3; }
+  .pad .diag  { font-size: 20px; }
+  .side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  #engage.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mode { font-size: 13px; color: var(--muted); }
+  .mode b { color: var(--text); }
+  .dials {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .dial { padding: 10px 12px; text-align: center; }
+  .dial h2 { text-align: left; }
+  .dial svg { width: 100%; max-width: 260px; display: block; margin: 0 auto; }
+  .dial .face { fill: none; stroke: var(--seg); stroke-width: 8; stroke-linecap: round; }
+  .dial .tick { stroke: var(--muted); stroke-width: 1.5; }
+  .dial .tick.major { stroke: var(--text); stroke-width: 2.5; }
+  .dial .label { fill: var(--muted); font-size: 11px; text-anchor: middle; dominant-baseline: middle; }
+  .dial .readout { fill: var(--text); font-size: 20px; font-weight: 700; text-anchor: middle;
+                   font-variant-numeric: tabular-nums; }
+  .dial .gear { fill: var(--muted); font-size: 16px; font-weight: 700; text-anchor: middle; opacity: .45; }
+  .dial .gear.on { opacity: 1; }
+  /* A halo in the panel colour keeps the readout and gears legible where the
+     needle passes under them (near 0 it points straight through them). */
+  .dial .readout, .dial .gear { paint-order: stroke; stroke: var(--panel); stroke-width: 6px;
+                                stroke-linejoin: round; }
+  .dial .gear.on.park    { fill: var(--off); }
+  .dial .gear.on.reverse { fill: var(--reverse); }
+  .dial .gear.on.drive   { fill: var(--accent); }
+  .dial .needle { stroke: var(--accent); stroke-width: 3.5; stroke-linecap: round;
+                  transform-box: view-box; transform-origin: 100px 100px;
+                  transition: transform .12s linear, opacity .2s; }
+  .dial .needle.target { stroke: var(--muted); stroke-width: 6; opacity: .35; }
+  .dial .hub { fill: var(--text); }
+  .dial .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+               margin-top: 2px; }
+  .tele {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .tele .panel { padding: 10px 12px; }
+  .tele dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px;
+             font-size: 13px; }
+  .tele dt { color: var(--muted); }
+  .tele dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .tele dd.alert { color: var(--off); font-weight: 600; }
+  #msg { font-size: 13px; min-height: 18px; color: var(--muted); }
+  #msg.error { color: var(--off); }
+  .hint { font-size: 12px; color: var(--muted); }
+  .logbar { display: flex; align-items: center; gap: 12px; }
+  .logbar .seg { flex: 1; display: flex; }
+  .seg button { border-radius: 0; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; border-left: 0; }
+  .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .logview {
+    height: 45vh;
+    min-height: 200px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--log-bg);
+    color: var(--log-text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .logview[hidden] { display: none; }
+  .logview .dim     { color: var(--log-dim); }
+  .logview .warn    { color: var(--warn); }
+  .logview .error   { color: var(--error); }
+  .logview .control { color: var(--log-control); }
+  @media (max-width: 760px) {
+    .control { grid-template-columns: 1fr; justify-items: center; }
+    .side { width: 100%; }
+  }
+  @media (max-width: 480px) {
+    .dials { grid-template-columns: 1fr; }
+    .dial svg { max-width: 240px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Self-Driving Mercedes</h1>
+    <span id="status" class="status"><span class="dot"></span><span id="status-text">connecting…</span></span>
+    <button id="connect" type="button" disabled>Connect car</button>
+    <button id="disconnect" type="button" disabled>Disconnect car</button>
+  </header>
+
+  <section class="panel control">
+    <div class="pad">
+      <!-- Each button sends its own command, so telemetry can tell them apart;
+           a diagonal steps both the speed and the steering. -->
+      <button class="up-left diag" data-cmd="forward_left" type="button" title="Forward + Left" disabled>↖</button>
+      <button class="up-right diag" data-cmd="forward_right" type="button" title="Forward + Right" disabled>↗</button>
+      <button class="down-left diag" data-cmd="reverse_left" type="button" title="Reverse + Left" disabled>↙</button>
+      <button class="down-right diag" data-cmd="reverse_right" type="button" title="Reverse + Right" disabled>↘</button>
+      <button class="up" data-cmd="speed_up" type="button" disabled>▲ Forward</button>
+      <button class="left" data-cmd="turn_left" type="button" disabled>◀ Left</button>
+      <button class="stop" data-cmd="all_stop" type="button" disabled>STOP</button>
+      <button class="right" data-cmd="turn_right" type="button" disabled>Right ▶</button>
+      <button class="down" data-cmd="slow_down" type="button" disabled>▼ Reverse</button>
+      <button class="straight" data-cmd="straight" type="button" disabled>STRAIGHT</button>
+    </div>
+    <div class="side">
+      <div class="row">
+        <button id="engage" type="button" disabled>Take control</button>
+        <button id="recenter" type="button" disabled>Recenter steering</button>
+        <span class="mode">Car: <b id="mode">—</b></span>
+      </div>
+      <div class="row">
+        <span class="mode">Straight-ahead trim:</span>
+        <button id="trim-left" type="button" title="Move straight ahead left" disabled>◀</button>
+        <b id="trim" class="mode">—</b>
+        <button id="trim-right" type="button" title="Move straight ahead right" disabled>▶</button>
+      </div>
+      <div id="msg"></div>
+      <div class="hint">Keys while in control: ↑ ↓ speed, ← → steer, space = stop, Enter = straight.</div>
+    </div>
+  </section>
+
+  <!-- Dials: the solid needle is what the car is doing, the faint one what
+       the controls ask for (manual control only). -->
+  <section class="dials">
+    <div class="panel dial"><h2>Speed</h2>
+      <svg id="speed-dial" viewBox="-14 -14 228 192" role="img" aria-label="Speed"></svg>
+      <div class="sub" id="drive-sub">—</div>
+    </div>
+    <div class="panel dial"><h2>Steering</h2>
+      <svg id="steer-dial" viewBox="-14 -14 228 146" role="img" aria-label="Steering"></svg>
+      <div class="sub" id="steer-sub">—</div>
+    </div>
+  </section>
+
+  <section class="tele">
+    <div class="panel"><h2>Battery</h2><dl>
+      <dt>Voltage</dt><dd id="t-vbat">—</dd>
+      <dt>Temp</dt><dd id="t-temp">—</dd>
+      <dt>Brick error</dt><dd id="t-err">—</dd>
+    </dl></div>
+    <div class="panel"><h2>Front sensor</h2><dl>
+      <dt>Distance</dt><dd id="t-mm">—</dd>
+      <dt>Stops at</dt><dd id="t-trigger">—</dd>
+    </dl></div>
+  </section>
+
+  <div class="logbar">
+    <div class="seg" role="tablist">
+      <button id="show-log" type="button" role="tab" data-view="log">Server log</button>
+      <button id="show-telemetry" type="button" role="tab" data-view="telemetry">Telemetry</button>
+    </div>
+    <button id="clear" type="button">Clear</button>
+  </div>
+  <pre id="log" class="logview" aria-live="polite"></pre>
+  <pre id="telemetry" class="logview" aria-live="polite" hidden></pre>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  // ---- live logs (/ws/logs and /ws/telemetry), one shown at a time --------
+  const MAX_LINES = 3000;  // per view; keeps the page responsive on long sessions
+
+  function classifyLog(line) {
+    if (/Traceback|Error|failed|Aborting|aborted/i.test(line)) return "error";
+    if (/\[!\]|\s! /.test(line)) return "warn";
+    if (/INFO:|pwm=|vbat=|probe [+-]:/.test(line)) return "dim";
+    return "";
+  }
+
+  function classifyTelemetry(line) {
+    return /^\S+ \S+ {2}CONTROL /.test(line) ? "control" : "";
+  }
+
+  function append(view, line, classify) {
+    // Only follow the bottom if the viewer hasn't scrolled up to read. (A
+    // hidden view has no height, so it counts as at the bottom.)
+    const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+    const div = document.createElement("div");
+    div.textContent = line;
+    const cls = classify(line);
+    if (cls) div.className = cls;
+    view.appendChild(div);
+    while (view.childElementCount > MAX_LINES) view.firstElementChild.remove();
+    if (atBottom) view.scrollTop = view.scrollHeight;
+  }
+
+  function showView(name) {
+    for (const b of document.querySelectorAll(".seg button")) {
+      const on = b.dataset.view === name;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on);
+      $(b.dataset.view).hidden = !on;
+    }
+    $(name).scrollTop = $(name).scrollHeight;
+    try { localStorage.setItem("logView", name); } catch (e) {}
+  }
+  let savedView = null;
+  try { savedView = localStorage.getItem("logView"); } catch (e) {}
+  showView(savedView === "telemetry" ? "telemetry" : "log");
+  document.querySelectorAll(".seg button").forEach((b) => {
+    b.onclick = () => showView(b.dataset.view);
+  });
+  $("clear").onclick = () => {
+    const visible = document.querySelector(".logview:not([hidden])");
+    visible.textContent = "";
+  };
+
+  // Open a WebSocket and reopen it with backoff whenever it closes.
+  function keepOpen(path, handlers) {
+    let retry = 1000;
+    function open() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}${path}`);
+      ws.onopen = () => { retry = 1000; handlers.open(ws); };
+      ws.onmessage = (e) => handlers.message(e.data);
+      ws.onclose = () => {
+        handlers.close(retry);
+        setTimeout(open, retry);
+        retry = Math.min(retry * 2, 10000);
+      };
+    }
+    open();
+  }
+
+  // On (re)connect the server replays recent history, so start each view afresh.
+  keepOpen("/ws/logs", {
+    open: () => { $("log").textContent = ""; },
+    message: (line) => append($("log"), line, classifyLog),
+    close: () => {},
+  });
+  keepOpen("/ws/telemetry", {
+    open: () => { $("telemetry").textContent = ""; },
+    message: (line) => append($("telemetry"), line, classifyTelemetry),
+    close: () => {},
+  });
+
+  // ---- control and state (/ws/control) ------------------------------------
+  let control = null;      // the open control socket, if any
+  let state = null;        // the latest {"type": "state"} message
+
+  function send(cmd, extra = {}) {
+    if (control && control.readyState === WebSocket.OPEN) {
+      control.send(JSON.stringify({ cmd, ...extra }));
+    }
+  }
+
+  function setStatus(live, text) {
+    $("status").classList.toggle("live", live);
+    $("status-text").textContent = text;
+  }
+
+  let msgTimer = null;
+  function showMsg(text, isError) {
+    const el = $("msg");
+    el.textContent = text;
+    el.className = isError ? "error" : "";
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => { el.textContent = ""; }, 6000);
+  }
+
+  keepOpen("/ws/control", {
+    open: (ws) => { control = ws; setStatus(true, "server live"); },
+    message: (data) => {
+      const msg = JSON.parse(data);
+      if (msg.type === "error") showMsg(msg.msg, true);
+      else if (msg.type === "state") { state = msg; render(); }
+    },
+    close: (retry) => {
+      control = null;
+      state = null;
+      render();
+      setStatus(false, `server unreachable — retrying in ${retry / 1000}s`);
+    },
+  });
+
+  // Heartbeat: manual driving stops if the server stops hearing from us.
+  setInterval(() => send("ping"), 250);
+
+  // ---- dials --------------------------------------------------------------
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const SPEED_MAX = 0.8;    // m/s at the end of the speed dial (shown in cm/s)
+  const MOVING_VEL = 4;     // |vel| below this counts as stopped (STALL_VEL)
+
+  function svgEl(parent, tag, attrs) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  }
+  // A point `r` from the dial's centre (100, 100), `deg` clockwise from up.
+  function polar(deg, r) {
+    const a = deg * Math.PI / 180;
+    return [100 + r * Math.sin(a), 100 - r * Math.cos(a)];
+  }
+  // A dial face from `from` to `to` degrees, with ticks and labels, and two
+  // needles (target behind actual). Labels sit outside the ring, so the
+  // readout under the hub has the inside to itself. Returns the needles and
+  // the readout.
+  function buildDial(svg, from, to, ticks, labels, readoutY) {
+    const [x0, y0] = polar(from, 80), [x1, y1] = polar(to, 80);
+    svgEl(svg, "path", { class: "face",
+      d: `M${x0} ${y0} A80 80 0 ${to - from > 180 ? 1 : 0} 1 ${x1} ${y1}` });
+    for (const { deg, major } of ticks) {
+      const [a, b] = polar(deg, major ? 66 : 70), [c, d] = polar(deg, 76);
+      svgEl(svg, "line", { class: major ? "tick major" : "tick", x1: a, y1: b, x2: c, y2: d });
+    }
+    for (const { deg, text } of labels) {
+      const [x, y] = polar(deg, 94);
+      svgEl(svg, "text", { class: "label", x, y }).textContent = text;
+    }
+    const target = svgEl(svg, "line", { class: "needle target", x1: 100, y1: 100, x2: 100, y2: 30 });
+    const actual = svgEl(svg, "line", { class: "needle", x1: 100, y1: 100, x2: 100, y2: 26 });
+    svgEl(svg, "circle", { class: "hub", cx: 100, cy: 100, r: 5 });
+    const readout = svgEl(svg, "text", { class: "readout", x: 100, y: readoutY });
+    return { target, actual, readout };
+  }
+  function setNeedle(needle, deg) {
+    needle.style.opacity = deg === null ? 0 : "";
+    if (deg !== null) needle.style.transform = `rotate(${deg}deg)`;
+  }
+
+  // Speed: like a car's speedometer, 0 at the bottom left, clockwise to
+  // SPEED_MAX at the bottom right. P / R / D light up for stationary /
+  // moving backwards / moving forwards.
+  const speedDeg = (ms) => -135 + 270 * Math.min(Math.abs(ms), SPEED_MAX) / SPEED_MAX;
+  const speedTicks = [], speedLabels = [];
+  for (let i = 0; i <= 8; i++) {
+    speedTicks.push({ deg: speedDeg(i / 10), major: i % 2 === 0 });
+    if (i % 2 === 0) speedLabels.push({ deg: speedDeg(i / 10), text: String(i * 10) });
+  }
+  const speedDial = buildDial($("speed-dial"), -135, 135, speedTicks, speedLabels, 136);
+  const gears = {};
+  for (const [name, letter, x] of [["park", "P", 76], ["reverse", "R", 100], ["drive", "D", 124]]) {
+    gears[name] = svgEl($("speed-dial"), "text", { class: `gear ${name}`, x, y: 162 });
+    gears[name].textContent = letter;
+  }
+
+  // Steering: a half dial, full left to full right, straight ahead at the top.
+  const steerDeg = (frac) => 90 * Math.max(-1.1, Math.min(1.1, frac));
+  const steerTicks = [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1]
+    .map((f) => ({ deg: steerDeg(f), major: f % 0.5 === 0 }));
+  const steerDial = buildDial($("steer-dial"), -90, 90, steerTicks,
+    [{ deg: -90, text: "L" }, { deg: 0, text: "|" }, { deg: 90, text: "R" }], 124);
+
+  function renderDials(s, m, lim) {
+    const d = s && s.connected ? s.drive : {}, st = s && s.connected ? s.steer : {};
+    const known = (v) => v !== null && v !== undefined;
+
+    setNeedle(speedDial.actual, known(d.speed_ms) ? speedDeg(d.speed_ms) : null);
+    setNeedle(speedDial.target, m ? speedDeg(m.target_speed_ms) : null);
+    speedDial.readout.textContent = known(d.speed_ms) ? `${Math.round(Math.abs(d.speed_ms) * 100)} cm/s` : "—";
+    gears.drive.classList.toggle("on", known(d.vel) && d.vel >= MOVING_VEL);
+    gears.reverse.classList.toggle("on", known(d.vel) && d.vel <= -MOVING_VEL);
+    gears.park.classList.toggle("on", known(d.vel) && Math.abs(d.vel) < MOVING_VEL);
+    $("drive-sub").textContent = known(d.current_a)
+      ? `drive ${d.current_a.toFixed(2)} A · ${known(d.power_w) ? d.power_w.toFixed(1) : "—"} W` : "—";
+
+    const frac = st.actual_frac;
+    setNeedle(steerDial.actual, known(frac) ? steerDeg(frac) : null);
+    setNeedle(steerDial.target, m ? steerDeg(m.steer_level / lim.steer_levels) : null);
+    const pct = known(frac) ? Math.round(frac * 100) : null;
+    steerDial.readout.textContent = pct === null ? "—"
+      : Math.abs(pct) < 3 ? "straight" : `${Math.abs(pct)}% ${pct > 0 ? "R" : "L"}`;
+    $("steer-sub").textContent = known(st.pos_deg)
+      ? `motor ${st.pos_deg}° · abs ${st.abs_deg}° · ${known(st.current_a) ? st.current_a.toFixed(2) : "—"} A`
+      : "—";
+  }
+
+  const fmt = (v, unit, digits = 2) =>
+    v === null || v === undefined ? "—" : `${Number(v).toFixed(digits)} ${unit}`;
+
+  function render() {
+    const s = state;
+    const connected = !!(s && s.connected);
+    const controller = !!(s && s.controller);
+    const free = s && !s.busy;
+
+    $("mode").textContent = !s ? "—"
+      : s.mode === "manual" ? (controller ? "manual (you)" : "manual (another page)")
+      : s.mode;
+    $("connect").disabled = !s || connected || !free;
+    $("disconnect").disabled = !connected || !free;
+    $("recenter").disabled = !connected || !(free || controller);
+    const canTrim = !$("recenter").disabled && s.homed;
+    $("trim-left").disabled = $("trim-right").disabled = !canTrim;
+    $("trim").textContent = s && s.homed && s.steer.trim_deg !== undefined
+      ? `${s.steer.trim_deg >= 0 ? "+" : ""}${s.steer.trim_deg}°` : "—";
+    const engage = $("engage");
+    engage.disabled = !connected || !(free || controller);
+    engage.textContent = controller ? "Release control" : "Take control";
+    engage.classList.toggle("on", controller);
+    document.querySelectorAll(".pad button").forEach((b) => { b.disabled = !controller; });
+
+    const lim = s ? s.limits : { speed_levels: 6, steer_levels: 2 };
+    const m = s && s.manual;
+    renderDials(s, m, lim);
+    const b = s ? s.battery : {}, se = s ? s.sensor : {};
+    $("t-vbat").textContent = fmt(b.vbat, "V");
+    $("t-temp").textContent = fmt(b.temp_c, "°C", 0);
+    $("t-err").textContent = b.error === null || b.error === undefined ? "—" : (b.error ? "YES" : "no");
+    $("t-err").classList.toggle("alert", !!b.error);
+    $("t-mm").textContent = !s ? "—" : !se.present ? "no sensor" : fmt(se.mm, "mm", 0);
+    $("t-mm").classList.toggle("alert", !!se.blocked);
+    $("t-trigger").textContent = s ? `≤ ${se.trigger_mm} mm` : "—";
+  }
+  render();
+
+  document.querySelectorAll(".pad button").forEach((b) => {
+    b.onclick = () => send(b.dataset.cmd);
+  });
+  $("engage").onclick = () => send(state && state.controller ? "release" : "engage");
+
+  async function post(path, busyText, body) {
+    showMsg(busyText, false);
+    try {
+      const r = await fetch(path, body === undefined ? { method: "POST" } : {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const reply = await r.json().catch(() => ({}));
+      if (r.ok) showMsg(`${path}: ${reply.status || "ok"}`, false);
+      else showMsg(`${path}: ${reply.detail || r.statusText}`, true);
+    } catch (e) {
+      showMsg(`${path}: ${e}`, true);
+    }
+  }
+  $("recenter").onclick = () => post("/recenter", "Recentering the steering…");
+  const TRIM_STEP = 5;     // motor degrees per click, about 0.8 deg at the wheels
+  $("trim-left").onclick = () => post("/trim", "Trimming left…", { degrees: -TRIM_STEP });
+  $("trim-right").onclick = () => post("/trim", "Trimming right…", { degrees: TRIM_STEP });
+  $("connect").onclick = () => post("/connect", "Connecting to the car…");
+  $("disconnect").onclick = () => post("/disconnect", "Disconnecting…");
+
+  // While in control these keys act instead of their usual job, so Enter or
+  // space on a focused button presses the shortcut, not the button.
+  const KEYS = { ArrowUp: "speed_up", ArrowDown: "slow_down",
+                 ArrowLeft: "turn_left", ArrowRight: "turn_right",
+                 " ": "all_stop", Enter: "straight" };
+  document.addEventListener("keydown", (e) => {
+    const cmd = KEYS[e.key];
+    if (!cmd || !(state && state.controller) || e.repeat) return;
+    e.preventDefault();
+    send(cmd);
+  });
+</script>
+</body>
+</html>
