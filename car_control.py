@@ -150,6 +150,7 @@ STATUS_DROP_LOG_S = 10      # report dropped reports at most this often
 # react later.
 SENSOR_TRIGGER_MM = 250  # obstacle if the front sensor reads <= this (and > 0)
 SENSOR_MIN_MM     = 1    # readings at/below this are treated as invalid/noise
+SENSOR_STALE_S    = 0.25 # a measurement older than this counts as no reading
 
 latest_status = {}
 # The status filter's state: the steering motor's pos-to-abs_pos offset, the
@@ -159,7 +160,8 @@ status_filter = {"offset": None, "drops": 0, "unreported": 0, "logged": 0.0}
 drive_command = {"pwm": 0}
 disconnect_info = {"reason": None}
 distance_sensor = None    # set in main() when the VL53L0X is present
-last_distance = {"mm": None, "t": 0.0}   # last read_distance() result and when
+last_distance = {"mm": None, "t": 0.0}   # latest sensor measurement and when
+sensor_stats = {"readings": 0}            # measurements taken, for rate logging
 # Filled in by calibrate_steering()/abs_home() (see set_steering()): straight
 # ahead and the half-lock in motor degrees, each side's usable lock from
 # straight ahead, and the cached absolute angles.
@@ -662,7 +664,10 @@ def init_sensor():
     try:
         i2c = board.I2C()
         distance_sensor = adafruit_vl53l0x.VL53L0X(i2c)
-        print(f"Front sensor: VL53L0X ready (trigger <= {SENSOR_TRIGGER_MM} mm).")
+        # Range back to back (one measurement per ~33 ms timing budget), so
+        # read_distance() never has to wait for a measurement.
+        distance_sensor.start_continuous()
+        print("Front sensor: VL53L0X ready, ranging continuously.")
         return True
     except Exception as e:
         print(f"Front sensor: not detected ({e}) -> velocity-stall detection only.")
@@ -671,26 +676,24 @@ def init_sensor():
 
 
 def read_distance():
-    """Front obstacle distance in mm, or None if no sensor / bad read. Values at
-    or below SENSOR_MIN_MM are treated as invalid (error/no-return)."""
+    """Latest front obstacle distance in mm, or None if no sensor, a bad read,
+    or no measurement for SENSOR_STALE_S. The sensor ranges continuously, so
+    this never waits: it takes the new measurement if one is ready, else
+    returns the last. Values at or below SENSOR_MIN_MM are treated as invalid
+    (error/no-return)."""
     if distance_sensor is None:
         return None
+    now = time.time()
     try:
-        mm = distance_sensor.range
+        if distance_sensor.data_ready:
+            mm = distance_sensor.range
+            last_distance.update(mm=mm if mm > SENSOR_MIN_MM else None, t=now)
+            sensor_stats["readings"] += 1
     except Exception:
-        mm = None
-    if mm is not None and mm <= SENSOR_MIN_MM:
-        mm = None
-    last_distance.update(mm=mm, t=time.time())
-    return mm
-
-
-def recent_distance(max_age=0.25):
-    """The last distance reading if it's fresh (driving reads the sensor every
-    tick), otherwise a new reading. For display; avoids doubling sensor reads."""
-    if time.time() - last_distance["t"] <= max_age:
-        return last_distance["mm"]
-    return read_distance()
+        pass                                       # keep the last; it goes stale
+    if now - last_distance["t"] > SENSOR_STALE_S:
+        return None
+    return last_distance["mm"]
 
 
 async def drive(client, char, pwm, seconds, steer_deg, detect=True, accelerate=False,

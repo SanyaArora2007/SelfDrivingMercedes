@@ -134,7 +134,7 @@ def _steer_detail(pos):
 def _distance_detail():
     if car_control.distance_sensor is None:
         return "no sensor"
-    mm = car_control.recent_distance()
+    mm = car_control.read_distance()
     if mm is None:
         return "no reading"
     if mm >= OUT_OF_RANGE_MM:

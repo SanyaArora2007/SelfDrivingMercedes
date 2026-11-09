@@ -38,6 +38,7 @@ STEER_LEVELS = 2       # levels each side of center; the last one is full lock
 
 DEADMAN_S = 1.0        # stop driving if the page goes quiet this long
 LOOP_HZ = 20
+RATE_LOG_S = 10.0      # log the loop and sensor rates this often while engaged
 
 # The front-sensor stop distance grows with the measured drive speed: the car
 # covers more ground between sensor readings, and coasts or brakes further,
@@ -132,8 +133,13 @@ class ManualDriver:
     async def run(self):
         print("Manual control engaged.")
         last_feed = 0.0
+        # Ticks run on a fixed schedule, so a slow one doesn't delay the rest.
+        next_tick = rate_since = time.monotonic()
+        ticks, longest = 0, 0.0
+        readings = car_control.sensor_stats["readings"]
         try:
             while not self._stop.is_set():
+                started = time.monotonic()
                 async with self._link:
                     self._safety_stops()
                     await send(self.client, self.char, motor_ext_packet({
@@ -144,8 +150,20 @@ class ManualDriver:
                     if now - last_feed > WATCHDOG_FEED:
                         await feed_watchdog(self.client, self.char)
                         last_feed = now
+
+                now = time.monotonic()
+                ticks, longest = ticks + 1, max(longest, now - started)
+                if now - rate_since >= RATE_LOG_S:
+                    new = car_control.sensor_stats["readings"]
+                    print(f"  manual loop: {ticks / (now - rate_since):.1f} Hz "
+                          f"(longest tick {longest * 1000:.0f} ms); front sensor: "
+                          f"{(new - readings) / (now - rate_since):.1f} readings/s")
+                    rate_since, ticks, longest, readings = now, 0, 0.0, new
+
+                # If a tick overran, carry on from now rather than catch up.
+                next_tick = max(next_tick + 1 / LOOP_HZ, now)
                 try:
-                    await asyncio.wait_for(self._stop.wait(), 1 / LOOP_HZ)
+                    await asyncio.wait_for(self._stop.wait(), next_tick - now)
                 except asyncio.TimeoutError:
                     pass
         except ConnectionError as e:
@@ -217,7 +235,7 @@ def telemetry(connected):
     pos = _port(s.get("pos", []), STEER_PORT)
     cal = car_control.steer_cal
     lock = None if pos is None else cal["lock_right"] if pos >= cal["center"] else cal["lock_left"]
-    mm = car_control.recent_distance()
+    mm = car_control.read_distance()
     return {
         "drive": {
             "vel": _port(s.get("vel", []), DRIVE_PORT),    # brick's raw units
