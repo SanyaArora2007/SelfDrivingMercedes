@@ -80,6 +80,9 @@
     background: var(--panel);
     color: var(--text);
     cursor: pointer;
+    /* A quick second tap is a second press, not a double-tap zoom (iOS);
+       pinch-to-zoom still works. */
+    touch-action: manipulation;
   }
   button:disabled { opacity: .4; cursor: default; }
   .panel {
@@ -123,7 +126,8 @@
            align-items: center; font-size: 13px; }
   .gauge .label { color: var(--muted); }
   .segs { display: flex; gap: 3px; }
-  .segs span { flex: 1; height: 14px; border-radius: 3px; background: var(--seg); }
+  .segs span { flex: 1; height: 14px; border-radius: 3px; background: var(--seg);
+               touch-action: manipulation; }
   .segs span.zero { flex: 0 0 6px; }
   .segs.clickable span { height: 22px; cursor: pointer; }
   .segs.clickable span.zero { flex-basis: 12px; }
